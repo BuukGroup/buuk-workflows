@@ -220,7 +220,8 @@ jobs:
           echo ""
 
           echo "📋 Starting backend with debug logging..."
-          npm run dev 2>&1 &
+          # Capture backend logs to a file
+          npm run dev > backend-server.log 2>&1 &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
 
