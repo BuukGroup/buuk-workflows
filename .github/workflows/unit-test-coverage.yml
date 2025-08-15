@@ -40,15 +40,18 @@ jobs:
 
     services:
       postgres:
-        image: ${{ inputs.database-required && 'postgres:14' || '' }}
+        image: postgres:14
         env:
           POSTGRES_PASSWORD: test
           POSTGRES_USER: test
           POSTGRES_DB: buuk_test
         options: >-
-          ${{ inputs.database-required && '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5' || '' }}
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
         ports:
-          - ${{ inputs.database-required && '5432:5432' || '' }}
+          - 5432:5432
 
     steps:
       - name: Checkout code
