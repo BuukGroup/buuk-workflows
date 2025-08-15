@@ -209,14 +209,33 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/buukdb
         run: |
           echo "🚀 Starting backend server..."
-          echo "🔍 E2E Environment Check:"
+          echo "🔍 E2E Environment Variables Check:"
           echo "  NODE_ENV: $NODE_ENV"
-          echo "  STRIPE_API_KEY: ${STRIPE_API_KEY:0:15}..." # Show first 15 chars to verify mock key
+          echo "  STRIPE_API_KEY: ${STRIPE_API_KEY:0:25}..."
+          echo "  STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:0:25}..."
+          echo "  DATABASE_URL: ${DATABASE_URL:0:50}..."
+          echo "  JWT_SECRET length: ${#JWT_SECRET}"
           echo "  API URL will be: http://localhost:8080/api/v1/"
+          echo ""
+          echo "🔍 All Environment Variables (for backend debug):"
+          env | grep -E "(NODE_ENV|STRIPE|JWT|DB_|DATABASE|CORS|API)" | sort
+          echo ""
           
-          npm run dev &
+          echo "📋 Starting backend with debug logging..."
+          npm run dev 2>&1 &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          
+          # Give server a moment to start and show any immediate errors
+          sleep 3
+          
+          # Check if process is still running
+          if ! kill -0 $SERVER_PID 2>/dev/null; then
+            echo "❌ Backend server died during startup!"
+            echo "🔍 Checking for error output..."
+            ps aux | grep node || true
+            exit 1
+          fi
 
           # Wait for server to be ready
           echo "⏳ Waiting for backend server to start..."
@@ -236,6 +255,11 @@ jobs:
             echo "Attempt $i/60 - waiting for backend..."
             sleep 2
           done
+          
+          # Test backend E2E mode detection
+          echo "🔍 Testing backend E2E mode detection..."
+          echo "📋 Health check response:"
+          curl -s "http://localhost:8080/api/v1/health" | jq . 2>/dev/null || curl -s "http://localhost:8080/api/v1/health"
 
       - name: Install frontend dependencies
         working-directory: frontend
