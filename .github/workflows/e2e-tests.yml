@@ -167,6 +167,8 @@ jobs:
         working-directory: backend
         env:
           NODE_ENV: development
+          E2E_TEST: true
+          E2E_MODE: true
           HOST: 0.0.0.0
           PORT: 8080
           DB_HOST: localhost
@@ -209,6 +211,12 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/buukdb
         run: |
           echo "🚀 Starting backend server..."
+          echo "🔍 E2E Environment Check:"
+          echo "  NODE_ENV: $NODE_ENV"
+          echo "  E2E_TEST: $E2E_TEST"
+          echo "  E2E_MODE: $E2E_MODE"
+          echo "  STRIPE_API_KEY: ${STRIPE_API_KEY:0:15}..." # Show first 15 chars
+          
           npm run dev &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
