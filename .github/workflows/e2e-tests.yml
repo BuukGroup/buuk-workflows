@@ -40,8 +40,6 @@ on:
       BUUK_ACCESS_TOKEN:
         description: 'Token for accessing private repositories'
         required: true
-      GITHUB_TOKEN:
-        required: false
 
 jobs:
   e2e-tests:

@@ -23,9 +23,7 @@ on:
         required: false
         type: string
         default: '14'
-    secrets:
-      GITHUB_TOKEN:
-        required: false
+
 
 jobs:
   integration-tests:

@@ -33,9 +33,7 @@ on:
         required: false
         type: string
         default: 'npm run build'
-    secrets:
-      GITHUB_TOKEN:
-        required: false
+
 
 jobs:
   frontend-build-lint:
