@@ -40,63 +40,11 @@ function log(message, level = 'info') {
   console.log(`${prefix} [${timestamp}] ${message}`);
 }
 
-function createIntegrationJestConfig() {
-  log('Creating custom Jest config for integration tests...');
-  
-  const integrationConfig = {
-    preset: 'ts-jest',
-    testEnvironment: 'node',
-    testMatch: ['**/*.acceptance.ts'],
-    testTimeout: options.timeout,
-    setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
-    moduleNameMapper: {
-      '^@/(.*)$': '<rootDir>/src/$1'
-    },
-    transform: {
-      '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }]
-    },
-    moduleFileExtensions: ['ts', 'js', 'json'],
-    verbose: true,
-    detectOpenHandles: true,
-    forceExit: true,
-    testPathIgnorePatterns: [
-      '<rootDir>/node_modules/',
-      '<rootDir>/src/__tests__/fixtures/',
-      '<rootDir>/src/__tests__/__samples__/',
-      '<rootDir>/src/__tests__/helpers/'
-    ]
-  };
-  
-  if (options.coverage) {
-    integrationConfig.collectCoverage = true;
-    integrationConfig.coverageDirectory = 'coverage-integration';
-    integrationConfig.collectCoverageFrom = [
-      'src/**/*.ts',
-      '!src/**/*.d.ts',
-      '!src/__tests__/**',
-      '!src/migrate.ts',
-      '!src/index.ts',
-      '!src/openapi-spec.ts',
-      '!src/datasources/*.ts',
-      '!src/keys.ts'
-    ];
-  }
-  
-  // Write temporary config file
-  const configPath = 'jest.integration.config.js';
-  const configContent = `module.exports = ${JSON.stringify(integrationConfig, null, 2)};`;
-  fs.writeFileSync(configPath, configContent);
-  
-  log(`Created temporary Jest config: ${configPath}`);
-  return configPath;
-}
 
 function buildJestCommand() {
-  // Create and use custom config for integration tests
-  const configPath = createIntegrationJestConfig();
-  
+  // Use the existing integration config from buuk-server
   const jestArgs = [
-    `--config=${configPath}`,
+    '--config=jest.integration.config.js',
     `--testTimeout=${options.timeout}`,
     '--verbose',
     '--detectOpenHandles',
@@ -141,7 +89,7 @@ function validateEnvironment() {
   }
   
   process.env.TEST_DATABASE_URL = options.databaseUrl;
-  log(`Database URL: ${options.databaseUrl.replace(/\\/\\/.*@/, '//***@')}`);
+  log(`Database URL: ${options.databaseUrl.replace(/\/\/.*@/, '//***@')}`);
   
   if (process.env.CI) {
     log('Running in CI environment');
