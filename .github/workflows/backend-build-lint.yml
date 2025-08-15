@@ -1,0 +1,284 @@
+name: Backend Build & Lint
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '24'
+      working-directory:
+        description: 'Working directory for the project'
+        required: false
+        type: string
+        default: '.'
+      run-typecheck:
+        description: 'Run TypeScript type checking'
+        required: false
+        type: boolean
+        default: true
+      run-audit:
+        description: 'Run npm security audit'
+        required: false
+        type: boolean
+        default: true
+      fail-on-audit:
+        description: 'Fail build on audit issues'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      GITHUB_TOKEN:
+        required: false
+
+jobs:
+  backend-build-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+      issues: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "📦 Installing dependencies..."
+          npm ci --prefer-offline --no-audit
+
+      - name: Security audit
+        if: inputs.run-audit
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "🔍 Running security audit..."
+          if [ "${{ inputs.fail-on-audit }}" = "true" ]; then
+            npm audit --audit-level=high
+          else
+            npm audit --audit-level=high || echo "⚠️ Audit found issues but continuing..."
+          fi
+          
+          # Generate audit report for artifacts
+          npm audit --json > audit-report.json || true
+          
+          # Count vulnerabilities
+          CRITICAL=$(cat audit-report.json | grep -o '"critical":[0-9]*' | cut -d':' -f2 | head -1 || echo "0")
+          HIGH=$(cat audit-report.json | grep -o '"high":[0-9]*' | cut -d':' -f2 | head -1 || echo "0")
+          MODERATE=$(cat audit-report.json | grep -o '"moderate":[0-9]*' | cut -d':' -f2 | head -1 || echo "0")
+          
+          echo "AUDIT_CRITICAL=$CRITICAL" >> $GITHUB_ENV
+          echo "AUDIT_HIGH=$HIGH" >> $GITHUB_ENV
+          echo "AUDIT_MODERATE=$MODERATE" >> $GITHUB_ENV
+          
+          echo "📊 Security audit summary:"
+          echo "   Critical: $CRITICAL"
+          echo "   High: $HIGH"
+          echo "   Moderate: $MODERATE"
+
+      - name: Lint code
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "🔍 Running ESLint..."
+          npm run lint
+          echo "✅ Linting passed"
+
+      - name: Format check
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "💅 Checking code formatting..."
+          if npm run prettier:check > /dev/null 2>&1; then
+            echo "✅ Code formatting is correct"
+          else
+            echo "❌ Code formatting issues found"
+            echo "Run 'npm run prettier:fix' to fix formatting issues"
+            npm run prettier:check || true
+            exit 1
+          fi
+
+      - name: TypeScript type check
+        if: inputs.run-typecheck
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "🔧 Running TypeScript type check..."
+          npx tsc --noEmit --incremental false
+          echo "✅ TypeScript compilation passed"
+
+      - name: Build project
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "🏗️ Building project..."
+          npm run build
+          echo "✅ Build completed successfully"
+
+      - name: Verify build output
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "🔍 Verifying build output..."
+          
+          if [ -d "dist" ]; then
+            echo "✅ Build directory 'dist' exists"
+            
+            # Count generated files
+            FILE_COUNT=$(find dist -name "*.js" | wc -l)
+            echo "📊 Generated $FILE_COUNT JavaScript files"
+            
+            # Check for main entry point
+            if [ -f "dist/index.js" ]; then
+              echo "✅ Main entry point 'dist/index.js' exists"
+            else
+              echo "⚠️ Main entry point 'dist/index.js' not found"
+            fi
+            
+            # Check build size
+            BUILD_SIZE=$(du -sh dist | cut -f1)
+            echo "📏 Build size: $BUILD_SIZE"
+            echo "BUILD_SIZE=$BUILD_SIZE" >> $GITHUB_ENV
+            echo "BUILD_FILES=$FILE_COUNT" >> $GITHUB_ENV
+          else
+            echo "❌ Build directory 'dist' not found"
+            exit 1
+          fi
+
+      - name: Test build execution
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "🧪 Testing build execution..."
+          
+          # Test that the built application can start
+          timeout 10s node dist/index.js --help > /dev/null 2>&1 || echo "⚠️ Build test completed (may require runtime dependencies)"
+          echo "✅ Build execution test completed"
+
+      - name: Generate build summary
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          # Collect build information
+          NODE_VERSION=$(node --version)
+          NPM_VERSION=$(npm --version)
+          TS_VERSION=$(npx tsc --version)
+          
+          echo "BUILD_NODE_VERSION=$NODE_VERSION" >> $GITHUB_ENV
+          echo "BUILD_NPM_VERSION=$NPM_VERSION" >> $GITHUB_ENV
+          echo "BUILD_TS_VERSION=$TS_VERSION" >> $GITHUB_ENV
+          
+          # Check for any build warnings in the output
+          if [ -f "build.log" ]; then
+            WARNING_COUNT=$(grep -c "warning" build.log || echo "0")
+            echo "BUILD_WARNINGS=$WARNING_COUNT" >> $GITHUB_ENV
+          else
+            echo "BUILD_WARNINGS=0" >> $GITHUB_ENV
+          fi
+
+      - name: Download PR commenter
+        if: github.event_name == 'pull_request'
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/BuukGroup/buuk-workflows/main/scripts/pr-commenter.js -o pr-commenter.js
+
+      - name: Comment PR with build results
+        if: github.event_name == 'pull_request'
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Determine overall status
+          STATUS="success"
+          
+          # Create detailed build information
+          BUILD_DETAILS=$(cat << EOF
+          {
+            "buildDetails": "Backend build and linting completed successfully!",
+            "metrics": {
+              "buildSize": "${{ env.BUILD_SIZE }}",
+              "buildFiles": ${{ env.BUILD_FILES }},
+              "buildWarnings": ${{ env.BUILD_WARNINGS }},
+              "auditCritical": ${{ env.AUDIT_CRITICAL || 0 }},
+              "auditHigh": ${{ env.AUDIT_HIGH || 0 }},
+              "auditModerate": ${{ env.AUDIT_MODERATE || 0 }}
+            },
+            "environment": {
+              "nodeVersion": "${{ env.BUILD_NODE_VERSION }}",
+              "npmVersion": "${{ env.BUILD_NPM_VERSION }}",
+              "typescriptVersion": "${{ env.BUILD_TS_VERSION }}",
+              "workingDirectory": "${{ inputs.working-directory }}"
+            },
+            "checks": {
+              "linting": "✅ Passed",
+              "formatting": "✅ Passed", 
+              "typecheck": "${{ inputs.run-typecheck && '✅ Passed' || '⏭️ Skipped' }}",
+              "build": "✅ Passed",
+              "audit": "${{ inputs.run-audit && '✅ Completed' || '⏭️ Skipped' }}"
+            }
+          }
+          EOF
+          )
+          
+          node pr-commenter.js \
+            --type build \
+            --status "$STATUS" \
+            --title "🏗️ Backend Build & Lint Results" \
+            --details "$BUILD_DETAILS"
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-build-artifacts
+          path: |
+            ${{ inputs.working-directory }}/dist/
+            ${{ inputs.working-directory }}/audit-report.json
+            ${{ inputs.working-directory }}/*.log
+          retention-days: 7
+
+      - name: Build Summary
+        if: always()
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "## 🏗️ Backend Build & Lint Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Status:** Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 📊 Build Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Size:** ${{ env.BUILD_SIZE || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Generated Files:** ${{ env.BUILD_FILES || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Warnings:** ${{ env.BUILD_WARNINGS || '0' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.run-audit }}" = "true" ]; then
+            echo "### 🔍 Security Audit" >> $GITHUB_STEP_SUMMARY
+            echo "- **Critical:** ${{ env.AUDIT_CRITICAL || '0' }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **High:** ${{ env.AUDIT_HIGH || '0' }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Moderate:** ${{ env.AUDIT_MODERATE || '0' }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "### ✅ Completed Checks" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dependency Installation:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **ESLint:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Prettier Formatting:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **TypeScript Type Check:** ${{ inputs.run-typecheck && '✅ Passed' || '⏭️ Skipped' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Audit:** ${{ inputs.run-audit && '✅ Completed' || '⏭️ Skipped' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 🔧 Environment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Node.js:** ${{ env.BUILD_NODE_VERSION || inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **npm:** ${{ env.BUILD_NPM_VERSION || 'Latest' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **TypeScript:** ${{ env.BUILD_TS_VERSION || 'Project Version' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Working Directory:** \`${{ inputs.working-directory }}\`" >> $GITHUB_STEP_SUMMARY

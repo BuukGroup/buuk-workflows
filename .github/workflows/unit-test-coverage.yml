@@ -1,0 +1,255 @@
+name: Unit Test Coverage
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '24'
+      project-type:
+        description: 'Project type: backend or frontend'
+        required: true
+        type: string
+      coverage-threshold:
+        description: 'Coverage threshold for changed files'
+        required: false
+        type: number
+        default: 20
+      working-directory:
+        description: 'Working directory for the project'
+        required: false
+        type: string
+        default: '.'
+      database-required:
+        description: 'Whether PostgreSQL database is required'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      GITHUB_TOKEN:
+        required: false
+
+jobs:
+  unit-test-coverage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+      issues: write
+
+    services:
+      postgres:
+        image: ${{ inputs.database-required && 'postgres:14' || '' }}
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_USER: test
+          POSTGRES_DB: buuk_test
+        options: >-
+          ${{ inputs.database-required && '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5' || '' }}
+        ports:
+          - ${{ inputs.database-required && '5432:5432' || '' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install system dependencies
+        if: inputs.database-required
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc postgresql-client
+
+      - name: Setup PostgreSQL database
+        if: inputs.database-required
+        env:
+          PGPASSWORD: test
+        run: |
+          # Download and run PostgreSQL setup script
+          curl -fsSL https://raw.githubusercontent.com/BuukGroup/buuk-workflows/main/scripts/postgres-setup.sh -o postgres-setup.sh
+          chmod +x postgres-setup.sh
+          ./postgres-setup.sh --host localhost --port 5432 --user test --password test --database buuk_test
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: npm ci
+
+      - name: Build project
+        working-directory: ${{ inputs.working-directory }}
+        run: npm run build
+
+      - name: Run tests with coverage
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          CI: true
+          NODE_ENV: test
+          TEST_DATABASE_URL: ${{ inputs.database-required && 'postgresql://test:test@localhost:5432/buuk_test' || '' }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # For PRs, run without strict global thresholds
+            npm run test:ci
+          else
+            # For pushes to main, use stricter thresholds
+            PR_COVERAGE_CHECK=true npm run test:ci
+          fi
+
+      - name: Download coverage calculator
+        if: github.event_name == 'pull_request'
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/BuukGroup/buuk-workflows/main/scripts/coverage-calculator.js -o coverage-calculator.js
+
+      - name: Calculate global coverage
+        if: github.event_name == 'pull_request'
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          GLOBAL_COVERAGE=$(node coverage-calculator.js --global)
+          echo "GLOBAL_COVERAGE=$GLOBAL_COVERAGE" >> $GITHUB_ENV
+          echo "📊 Global coverage: $GLOBAL_COVERAGE%"
+
+      - name: Check coverage for changed files
+        if: github.event_name == 'pull_request'
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          # Set file patterns based on project type
+          if [ "${{ inputs.project-type }}" = "frontend" ]; then
+            FILE_PATTERNS=".ts,.tsx,.js,.jsx"
+          else
+            FILE_PATTERNS=".ts,.js"
+          fi
+          
+          # Run coverage calculator for changed files
+          node coverage-calculator.js \
+            --changed-files \
+            --base-branch main \
+            --file-patterns "$FILE_PATTERNS" \
+            --source-dir src/
+
+      - name: Download PR commenter
+        if: github.event_name == 'pull_request'
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/BuukGroup/buuk-workflows/main/scripts/pr-commenter.js -o pr-commenter.js
+
+      - name: Comment PR with coverage results
+        if: github.event_name == 'pull_request'
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          PROJECT_NAME="${{ inputs.project-type == 'backend' && 'Backend' || 'Frontend' }}"
+          
+          node pr-commenter.js \
+            --type coverage \
+            --title "📊 $PROJECT_NAME Test Coverage Report" \
+            --global-coverage "$GLOBAL_COVERAGE" \
+            --changed-coverage "$CHANGED_FILES_COVERAGE" \
+            --coverage-details "$CHANGED_FILES_DETAILS"
+
+      - name: Fail if coverage is insufficient
+        if: github.event_name == 'pull_request' && env.COVERAGE_CHECK_FAILED == 'true'
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "❌ Coverage check failed - see PR comment for details"
+          exit 1
+
+      - name: Archive coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.project-type }}-coverage-report
+          path: |
+            ${{ inputs.working-directory }}/coverage/
+            !${{ inputs.working-directory }}/coverage/tmp/
+          retention-days: 7
+
+      - name: Coverage Summary
+        if: always()
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          PROJECT_NAME="${{ inputs.project-type == 'backend' && 'Backend' || 'Frontend' }}"
+          echo "## 🏗️ $PROJECT_NAME Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f coverage/coverage-final.json ]; then
+            # Extract coverage metrics using a more reliable method
+            node -e "
+              try {
+                const coverage = require('./coverage/coverage-final.json');
+                let totalLines = 0, coveredLines = 0;
+                let totalFunctions = 0, coveredFunctions = 0;
+                let totalBranches = 0, coveredBranches = 0;
+                let totalStatements = 0, coveredStatements = 0;
+                
+                Object.values(coverage).forEach(fileData => {
+                  if (fileData.lines) {
+                    totalLines += Object.keys(fileData.lines).length;
+                    coveredLines += Object.values(fileData.lines).filter(hits => hits > 0).length;
+                  }
+                  if (fileData.functions) {
+                    totalFunctions += Object.keys(fileData.functions).length;
+                    coveredFunctions += Object.values(fileData.functions).filter(hits => hits > 0).length;
+                  }
+                  if (fileData.branches) {
+                    totalBranches += Object.keys(fileData.branches).length;
+                    coveredBranches += Object.values(fileData.branches).filter(hits => hits > 0).length;
+                  }
+                  if (fileData.statements) {
+                    totalStatements += Object.keys(fileData.statements).length;
+                    coveredStatements += Object.values(fileData.statements).filter(hits => hits > 0).length;
+                  }
+                });
+                
+                const linePct = totalLines > 0 ? ((coveredLines / totalLines) * 100).toFixed(2) : '0.00';
+                const funcPct = totalFunctions > 0 ? ((coveredFunctions / totalFunctions) * 100).toFixed(2) : '0.00';
+                const branchPct = totalBranches > 0 ? ((coveredBranches / totalBranches) * 100).toFixed(2) : '0.00';
+                const stmtPct = totalStatements > 0 ? ((coveredStatements / totalStatements) * 100).toFixed(2) : '0.00';
+                
+                console.log('LINES_PCT=' + linePct);
+                console.log('FUNCTIONS_PCT=' + funcPct);
+                console.log('BRANCHES_PCT=' + branchPct);
+                console.log('STATEMENTS_PCT=' + stmtPct);
+              } catch (error) {
+                console.log('LINES_PCT=0.00');
+                console.log('FUNCTIONS_PCT=0.00');
+                console.log('BRANCHES_PCT=0.00');
+                console.log('STATEMENTS_PCT=0.00');
+              }
+            " >> $GITHUB_ENV
+            
+            echo "| Metric | Coverage | Local Threshold | PR Changed Files Threshold |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|----------|-----------------|---------------------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Lines | $LINES_PCT% | 10% | ${{ inputs.coverage-threshold }}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Functions | $FUNCTIONS_PCT% | 2% | 10% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Branches | $BRANCHES_PCT% | 2% | 10% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Statements | $STATEMENTS_PCT% | 2% | 10% |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "**PR Requirements:** Only changed files must meet ${{ inputs.coverage-threshold }}% line coverage" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "**Main Branch:** Stricter global thresholds apply" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ Coverage report not found" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Environment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Node.js:** ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Project Type:** ${{ inputs.project-type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Database Required:** ${{ inputs.database-required }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Coverage Threshold:** ${{ inputs.coverage-threshold }}%" >> $GITHUB_STEP_SUMMARY

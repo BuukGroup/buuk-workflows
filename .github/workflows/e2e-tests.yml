@@ -1,0 +1,519 @@
+name: E2E Tests
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '24'
+      frontend-repo:
+        description: 'Frontend repository (owner/repo format)'
+        required: true
+        type: string
+      backend-repo:
+        description: 'Backend repository (owner/repo format)'  
+        required: true
+        type: string
+      frontend-ref:
+        description: 'Frontend branch/ref to checkout'
+        required: false
+        type: string
+        default: 'main'
+      backend-ref:
+        description: 'Backend branch/ref to checkout'
+        required: false
+        type: string
+        default: 'main'
+      postgres-version:
+        description: 'PostgreSQL version to use'
+        required: false
+        type: string
+        default: '15'
+      test-timeout:
+        description: 'Test timeout in minutes'
+        required: false
+        type: number
+        default: 30
+    secrets:
+      BUUK_ACCESS_TOKEN:
+        description: 'Token for accessing private repositories'
+        required: true
+      GITHUB_TOKEN:
+        required: false
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.test-timeout }}
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+
+    services:
+      postgres:
+        image: postgis/postgis:${{ inputs.postgres-version }}-3.4
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: buukdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout frontend code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.frontend-repo }}
+          ref: ${{ inputs.frontend-ref }}
+          path: frontend
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout backend code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.backend-repo }}
+          ref: ${{ inputs.backend-ref }}
+          path: backend
+          token: ${{ secrets.BUUK_ACCESS_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client curl
+
+      - name: Setup PostgreSQL with PostGIS extensions
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # Download and run PostgreSQL setup script
+          curl -fsSL https://raw.githubusercontent.com/BuukGroup/buuk-workflows/main/scripts/postgres-setup.sh -o postgres-setup.sh
+          chmod +x postgres-setup.sh
+          ./postgres-setup.sh --host localhost --port 5432 --user postgres --password postgres --database buukdb --timeout 60
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          echo "📦 Installing backend dependencies..."
+          npm ci
+
+      - name: Build backend
+        working-directory: backend
+        run: |
+          echo "🏗️ Building backend..."
+          npm run build
+
+      - name: Start backend server
+        working-directory: backend
+        env:
+          NODE_ENV: development
+          HOST: 0.0.0.0
+          PORT: 8080
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_DATABASE: buukdb
+          JWT_SECRET: 'test1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6'
+          JWT_REFRESH_SECRET: 'testc2d3e4f5g6h7i8j9k0l1m2n3o4p5q6'
+          LOCAL_FILE_HOST: 'http://localhost:8080/api/v1/uploads'
+          CORS_ORIGIN: 'http://localhost:3000/'
+          MAX_FILE_SIZE: 5000000
+          FILES_LIMIT_NUMBER: 10
+          # E2E Mock service credentials
+          IMAGEKIT_PUBLIC_KEY: public_TEST_E2E_KEY
+          IMAGEKIT_PRIVATE_KEY: private_TEST_E2E_KEY
+          IMAGEKIT_URL_ENDPOINT: https://ik.imagekit.io/test-e2e
+          STRIPE_API_KEY: sk_test_E2E_TEST_KEY_NOT_REAL
+          STRIPE_WEBHOOK_SECRET: whsec_test_e2e_webhook_secret_not_real
+          TWILIO_ACCOUNT_SID: ACtest_e2e_account_sid
+          TWILIO_AUTH_TOKEN: test_e2e_auth_token
+          TWILIO_PHONE_NUMBER: +12250000000
+          TWILIO_MESSAGING_SERVICE_SID: MGtest_e2e_messaging_service
+          EMAIL_USER: e2e-test@buuk-test.com
+          EMAIL_PASS: test_email_pass
+          EMAIL_FROM: Buuk E2E <e2e-test@buuk-test.com>
+          VAPID_PUBLIC_KEY: BEl62iUYgUivxIkv69yViEuiBIa40HdAeHXFWUqJyV-YqU61pS-9-JgNcuEFOXkZfyf29QRQWfhRw3S6Tl6Lohw
+          VAPID_PRIVATE_KEY: rAaHWQNb-8j_kE1rOL8TF4vYZxjkGYLjHwu-Q5xWV1M
+          VAPID_SUBJECT: mailto:e2e-test@buuk-test.com
+          GOOGLE_CLIENT_ID: test-client-id.apps.googleusercontent.com
+          GOOGLE_CLIENT_SECRET: TEST-E2E-CLIENT-SECRET
+          GOOGLE_REDIRECT_URI: http://localhost:3000
+          # Ensure PostgreSQL connection uses correct user
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGHOST: localhost
+          PGPORT: 5432
+          PGDATABASE: buukdb
+          USER: postgres
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/buukdb
+        run: |
+          echo "🚀 Starting backend server..."
+          npm run dev &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+
+          # Wait for server to be ready
+          echo "⏳ Waiting for backend server to start..."
+          for i in {1..60}; do
+            if curl -f http://localhost:8080/api/v1/health >/dev/null 2>&1; then
+              echo "✅ Backend server is ready"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "❌ Backend server failed to start"
+              echo "🔍 Debugging server startup..."
+              curl -v http://localhost:8080/api/v1/health || true
+              ps aux | grep node || true
+              netstat -tlnp | grep :8080 || true
+              exit 1
+            fi
+            echo "Attempt $i/60 - waiting for backend..."
+            sleep 2
+          done
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: |
+          echo "📦 Installing frontend dependencies..."
+          npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_PROTOCOL: http
+          NEXT_PUBLIC_API_HOST: localhost
+          NEXT_PUBLIC_API_PREFIX: api
+          NEXT_PUBLIC_API_PORT: 8080
+          NEXT_PUBLIC_API_VERSION: v1
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID: test-client-id.apps.googleusercontent.com
+          NEXT_PUBLIC_GOOGLE_CLIENT_SECRET: TEST-E2E-CLIENT-SECRET
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          NEXT_PUBLIC_ENVIRONMENT: development
+          NEXT_PUBLIC_E2E_TEST: true
+          BASE_URL: http://localhost:3000
+          LAUNCH_WEB_SERVER: '0'
+        run: |
+          echo "🏗️ Building frontend..."
+          npm run build
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: |
+          echo "🎭 Installing Playwright browsers..."
+          npx playwright install chromium
+
+      - name: Start frontend server and run E2E tests
+        working-directory: frontend
+        env:
+          NODE_ENV: development
+          NEXT_PUBLIC_API_PROTOCOL: http
+          NEXT_PUBLIC_API_HOST: localhost
+          NEXT_PUBLIC_API_PREFIX: api
+          NEXT_PUBLIC_API_PORT: 8080
+          NEXT_PUBLIC_API_VERSION: v1
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID: test-client-id.apps.googleusercontent.com
+          NEXT_PUBLIC_GOOGLE_CLIENT_SECRET: TEST-E2E-CLIENT-SECRET
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          NEXT_PUBLIC_ENVIRONMENT: development
+          NEXT_PUBLIC_E2E_TEST: true
+          BASE_URL: http://localhost:3000
+          LAUNCH_WEB_SERVER: '0'
+          CI: true
+        run: |
+          echo "🚀 Starting frontend server..."
+          
+          # Create log files
+          FRONTEND_LOG="frontend-server.log"
+          FRONTEND_ERROR_LOG="frontend-errors.log"
+
+          # Start frontend server with logging
+          npm run start > "$FRONTEND_LOG" 2> "$FRONTEND_ERROR_LOG" &
+          FRONTEND_PID=$!
+          echo "FRONTEND_PID=$FRONTEND_PID" >> $GITHUB_ENV
+          echo "Frontend PID: $FRONTEND_PID"
+
+          # Wait for frontend to be ready
+          echo "⏳ Waiting for frontend server to start..."
+          for i in {1..60}; do
+            # Check if process is still running
+            if ! kill -0 $FRONTEND_PID 2>/dev/null; then
+              echo "❌ Frontend process died! Checking logs..."
+              echo "=== FRONTEND STDOUT ==="
+              cat "$FRONTEND_LOG" || echo "No stdout log"
+              echo "=== FRONTEND STDERR ==="
+              cat "$FRONTEND_ERROR_LOG" || echo "No stderr log"
+              exit 1
+            fi
+
+            # Test server responsiveness
+            if curl -f http://localhost:3000 >/dev/null 2>&1; then
+              echo "✅ Frontend server is ready (attempt $i)"
+              
+              # Test the signup page specifically
+              if curl -f "http://localhost:3000/signup?e2e_test=true" >/dev/null 2>&1; then
+                echo "✅ Signup page is accessible"
+              else
+                echo "⚠️ Signup page returned error, but continuing..."
+              fi
+              break
+            fi
+
+            if [ $i -eq 60 ]; then
+              echo "❌ Frontend server failed to start after 60 attempts"
+              echo "=== DEBUGGING INFORMATION ==="
+              echo "Process status:"
+              ps aux | grep node || echo "No node processes found"
+              echo "Network status:"
+              netstat -tlnp | grep :3000 || echo "No process listening on port 3000"
+              echo "=== FRONTEND LOGS ==="
+              echo "STDOUT:"
+              cat "$FRONTEND_LOG" || echo "No stdout log available"
+              echo "STDERR:"
+              cat "$FRONTEND_ERROR_LOG" || echo "No stderr log available"
+              exit 1
+            fi
+
+            if [ $((i % 10)) -eq 0 ]; then
+              echo "Still waiting... (attempt $i/60)"
+            fi
+            sleep 2
+          done
+
+          # Final verification
+          echo "🔍 Final server verification..."
+          curl -I http://localhost:3000 || true
+
+          # Small delay to ensure servers are fully ready
+          sleep 5
+
+          # Run E2E tests
+          echo "🎯 Running E2E tests..."
+          npm run test:e2e
+
+      - name: Parse E2E test results
+        if: always()
+        working-directory: frontend
+        run: |
+          echo "📊 Parsing E2E test results..."
+          
+          if [ -f "playwright-report/results.json" ]; then
+            echo "📋 E2E test results found"
+            
+            # Extract results using Node.js
+            node -e "
+              try {
+                const results = require('./playwright-report/results.json');
+                console.log('E2E_SUCCESS=true');
+                
+                // Parse Playwright JSON report structure
+                let failed = 0, passed = 0, skipped = 0;
+                
+                if (results.stats) {
+                  failed = results.stats.failed || results.stats.unexpected || 0;
+                  passed = results.stats.passed || results.stats.expected || 0;
+                  skipped = results.stats.skipped || 0;
+                } else if (results.suites && Array.isArray(results.suites)) {
+                  function countTests(suite) {
+                    if (suite.tests && Array.isArray(suite.tests)) {
+                      suite.tests.forEach(test => {
+                        const testResults = test.results || [];
+                        testResults.forEach(result => {
+                          if (result.status === 'failed' || result.status === 'timedOut') {
+                            failed++;
+                          } else if (result.status === 'passed') {
+                            passed++;
+                          } else if (result.status === 'skipped') {
+                            skipped++;
+                          }
+                        });
+                      });
+                    }
+                    if (suite.suites && Array.isArray(suite.suites)) {
+                      suite.suites.forEach(countTests);
+                    }
+                  }
+                  results.suites.forEach(countTests);
+                }
+                
+                const total = failed + passed + skipped;
+                
+                console.log('E2E_PASSED=' + passed);
+                console.log('E2E_FAILED=' + failed);
+                console.log('E2E_SKIPPED=' + skipped);
+                console.log('E2E_TOTAL=' + total);
+                
+                if (failed > 0) {
+                  console.log('E2E_SUCCESS=false');
+                  console.log('E2E_SUMMARY=' + failed + ' test(s) failed out of ' + total + ' total tests');
+                } else {
+                  console.log('E2E_SUMMARY=All ' + passed + ' test(s) passed successfully!' + (skipped > 0 ? ' (' + skipped + ' skipped)' : ''));
+                }
+              } catch (error) {
+                console.log('E2E_SUCCESS=false');
+                console.log('E2E_SUMMARY=Could not parse test results');
+                console.log('E2E_PASSED=0');
+                console.log('E2E_FAILED=0');
+                console.log('E2E_SKIPPED=0');
+                console.log('E2E_TOTAL=0');
+              }
+            " >> $GITHUB_ENV
+            
+            echo "✅ E2E test results parsed"
+          else
+            echo "⚠️ No E2E test results file found"
+            echo "E2E_SUCCESS=false" >> $GITHUB_ENV
+            echo "E2E_SUMMARY=Test results file not found" >> $GITHUB_ENV
+            echo "E2E_PASSED=0" >> $GITHUB_ENV
+            echo "E2E_FAILED=0" >> $GITHUB_ENV
+            echo "E2E_SKIPPED=0" >> $GITHUB_ENV
+            echo "E2E_TOTAL=0" >> $GITHUB_ENV
+          fi
+
+      - name: Download PR commenter
+        if: github.event_name == 'pull_request'
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/BuukGroup/buuk-workflows/main/scripts/pr-commenter.js -o pr-commenter.js
+
+      - name: Comment PR with E2E results
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          STATUS="${{ env.E2E_SUCCESS == 'true' && 'success' || 'failure' }}"
+          
+          # Create detailed test information
+          TEST_DETAILS=$(cat << EOF
+          {
+            "testDetails": "${{ env.E2E_SUMMARY }}",
+            "metrics": {
+              "passed": ${{ env.E2E_PASSED }},
+              "failed": ${{ env.E2E_FAILED }},
+              "skipped": ${{ env.E2E_SKIPPED }},
+              "total": ${{ env.E2E_TOTAL }}
+            },
+            "environment": {
+              "nodeVersion": "${{ inputs.node-version }}",
+              "postgresVersion": "${{ inputs.postgres-version }}",
+              "frontendRepo": "${{ inputs.frontend-repo }}",
+              "backendRepo": "${{ inputs.backend-repo }}",
+              "frontendRef": "${{ inputs.frontend-ref }}",
+              "backendRef": "${{ inputs.backend-ref }}"
+            }
+          }
+          EOF
+          )
+          
+          node pr-commenter.js \
+            --type e2e \
+            --status "$STATUS" \
+            --title "🎭 E2E Test Results" \
+            --details "$TEST_DETAILS"
+
+      - name: Upload server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: |
+            frontend/frontend-server.log
+            frontend/frontend-errors.log
+          retention-days: 7
+
+      - name: Upload E2E test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          retention-days: 7
+
+      - name: Upload E2E test videos
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-videos
+          path: frontend/test-results/
+          retention-days: 3
+
+      - name: Cleanup processes
+        if: always()
+        run: |
+          echo "🧹 Cleaning up background processes..."
+          
+          # Kill frontend server
+          if [ ! -z "$FRONTEND_PID" ]; then
+            kill $FRONTEND_PID 2>/dev/null || true
+            echo "Frontend server stopped"
+          fi
+          
+          # Kill backend server
+          if [ ! -z "$SERVER_PID" ]; then
+            kill $SERVER_PID 2>/dev/null || true
+            echo "Backend server stopped"
+          fi
+          
+          # Kill any remaining Node processes on our ports
+          lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+          lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+
+      - name: E2E Test Summary
+        if: always()
+        run: |
+          echo "## 🎭 E2E Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ env.E2E_SUCCESS }}" = "true" ]; then
+            echo "✅ **Status:** Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Status:** Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "📊 **Results:** ${{ env.E2E_PASSED }} passed, ${{ env.E2E_FAILED }} failed, ${{ env.E2E_SKIPPED }} skipped, ${{ env.E2E_TOTAL }} total" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Test Environment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend Repository:** ${{ inputs.frontend-repo }}@${{ inputs.frontend-ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Backend Repository:** ${{ inputs.backend-repo }}@${{ inputs.backend-ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Node.js:** ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **PostgreSQL:** ${{ inputs.postgres-version }} with PostGIS 3.4" >> $GITHUB_STEP_SUMMARY
+          echo "- **Backend URL:** http://localhost:8080" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend URL:** http://localhost:3000" >> $GITHUB_STEP_SUMMARY
+          echo "- **Browser:** Chromium (Playwright)" >> $GITHUB_STEP_SUMMARY
+          echo "- **E2E Mode:** Enabled (mocked emails, Stripe)" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f frontend/playwright-report/results.json ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Test Results Details" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat frontend/playwright-report/results.json | head -20 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail if E2E tests failed
+        if: env.E2E_SUCCESS != 'true'
+        run: |
+          echo "❌ E2E tests failed"
+          echo "Summary: ${{ env.E2E_SUMMARY }}"
+          echo "Results: ${{ env.E2E_PASSED }} passed, ${{ env.E2E_FAILED }} failed"
+          exit 1

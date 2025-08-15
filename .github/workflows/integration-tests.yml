@@ -1,0 +1,278 @@
+name: Integration Tests
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '24'
+      working-directory:
+        description: 'Working directory for the project'
+        required: false
+        type: string
+        default: '.'
+      test-timeout:
+        description: 'Test timeout in milliseconds'
+        required: false
+        type: number
+        default: 30000
+      postgres-version:
+        description: 'PostgreSQL version to use'
+        required: false
+        type: string
+        default: '14'
+    secrets:
+      GITHUB_TOKEN:
+        required: false
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+      issues: write
+
+    services:
+      postgres:
+        image: postgres:${{ inputs.postgres-version }}
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_USER: test
+          POSTGRES_DB: buuk_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc postgresql-client curl
+
+      - name: Setup PostgreSQL with PostGIS extensions
+        env:
+          PGPASSWORD: test
+        run: |
+          # Download and run PostgreSQL setup script
+          curl -fsSL https://raw.githubusercontent.com/BuukGroup/buuk-workflows/main/scripts/postgres-setup.sh -o postgres-setup.sh
+          chmod +x postgres-setup.sh
+          ./postgres-setup.sh --host localhost --port 5432 --user test --password test --database buuk_test --timeout 60
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: npm ci
+
+      - name: Build project
+        working-directory: ${{ inputs.working-directory }}
+        run: npm run build
+
+      - name: Download integration test runner
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/BuukGroup/buuk-workflows/main/scripts/integration-test-runner.js -o integration-test-runner.js
+
+      - name: Run integration tests
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          CI: true
+          NODE_ENV: test
+          TEST_DATABASE_URL: postgresql://test:test@localhost:5432/buuk_test
+          # LoopBack 4 specific environment variables
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: test
+          DB_PASSWORD: test
+          DB_DATABASE: buuk_test
+          # Override system defaults
+          PGUSER: test
+          PGPASSWORD: test
+          PGHOST: localhost
+          PGPORT: 5432
+          PGDATABASE: buuk_test
+        run: |
+          echo "🧪 Starting integration tests..."
+          echo "📋 Environment:"
+          echo "   Node.js: $(node --version)"
+          echo "   Database: $TEST_DATABASE_URL"
+          echo "   Working Directory: ${{ inputs.working-directory }}"
+          echo "   Test Timeout: ${{ inputs.test-timeout }}ms"
+          
+          # Run integration tests with the custom runner
+          node integration-test-runner.js \
+            --pattern "**/*.acceptance.ts" \
+            --database-url "$TEST_DATABASE_URL" \
+            --timeout ${{ inputs.test-timeout }} \
+            --verbose \
+            --coverage
+
+      - name: Parse integration test results
+        if: always()
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ -f integration-test-results.json ]; then
+            echo "📊 Integration test results found"
+            
+            # Extract results using Node.js
+            node -e "
+              try {
+                const results = require('./integration-test-results.json');
+                console.log('INTEGRATION_SUCCESS=' + results.success);
+                console.log('INTEGRATION_DURATION=' + (results.duration || 0));
+                
+                if (results.results) {
+                  console.log('INTEGRATION_PASSED=' + (results.results.passed || 0));
+                  console.log('INTEGRATION_FAILED=' + (results.results.failed || 0));
+                  console.log('INTEGRATION_TOTAL=' + (results.results.total || 0));
+                } else {
+                  console.log('INTEGRATION_PASSED=0');
+                  console.log('INTEGRATION_FAILED=0');
+                  console.log('INTEGRATION_TOTAL=0');
+                }
+                
+                // Generate summary for PR comment
+                const summary = results.success 
+                  ? 'All integration tests passed successfully!'
+                  : 'Integration tests failed - check logs for details';
+                console.log('INTEGRATION_SUMMARY=' + summary);
+              } catch (error) {
+                console.log('INTEGRATION_SUCCESS=false');
+                console.log('INTEGRATION_SUMMARY=Failed to parse test results');
+                console.log('INTEGRATION_PASSED=0');
+                console.log('INTEGRATION_FAILED=0');
+                console.log('INTEGRATION_TOTAL=0');
+                console.log('INTEGRATION_DURATION=0');
+              }
+            " >> $GITHUB_ENV
+            
+            echo "✅ Integration test results parsed"
+          else
+            echo "⚠️ No integration test results file found"
+            echo "INTEGRATION_SUCCESS=false" >> $GITHUB_ENV
+            echo "INTEGRATION_SUMMARY=No integration test results found" >> $GITHUB_ENV
+            echo "INTEGRATION_PASSED=0" >> $GITHUB_ENV
+            echo "INTEGRATION_FAILED=0" >> $GITHUB_ENV
+            echo "INTEGRATION_TOTAL=0" >> $GITHUB_ENV
+            echo "INTEGRATION_DURATION=0" >> $GITHUB_ENV
+          fi
+
+      - name: Download PR commenter
+        if: github.event_name == 'pull_request'
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/BuukGroup/buuk-workflows/main/scripts/pr-commenter.js -o pr-commenter.js
+
+      - name: Comment PR with integration test results
+        if: github.event_name == 'pull_request'
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          STATUS="${{ env.INTEGRATION_SUCCESS == 'true' && 'success' || 'failure' }}"
+          
+          # Create detailed test information
+          TEST_DETAILS=$(cat << EOF
+          {
+            "testDetails": "${{ env.INTEGRATION_SUMMARY }}",
+            "metrics": {
+              "passed": ${{ env.INTEGRATION_PASSED }},
+              "failed": ${{ env.INTEGRATION_FAILED }},
+              "total": ${{ env.INTEGRATION_TOTAL }},
+              "duration": "${{ env.INTEGRATION_DURATION }}ms"
+            },
+            "environment": {
+              "nodeVersion": "${{ inputs.node-version }}",
+              "postgresVersion": "${{ inputs.postgres-version }}",
+              "testTimeout": "${{ inputs.test-timeout }}ms"
+            }
+          }
+          EOF
+          )
+          
+          node pr-commenter.js \
+            --type e2e \
+            --status "$STATUS" \
+            --title "🧪 Integration Test Results" \
+            --details "$TEST_DETAILS"
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: |
+            ${{ inputs.working-directory }}/integration-test-results.json
+            ${{ inputs.working-directory }}/coverage-integration/
+          retention-days: 7
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-logs
+          path: |
+            ${{ inputs.working-directory }}/*.log
+          retention-days: 3
+
+      - name: Integration Test Summary
+        if: always()
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "## 🧪 Integration Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ env.INTEGRATION_SUCCESS }}" = "true" ]; then
+            echo "✅ **Status:** Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Status:** Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "📊 **Results:** ${{ env.INTEGRATION_PASSED }} passed, ${{ env.INTEGRATION_FAILED }} failed, ${{ env.INTEGRATION_TOTAL }} total" >> $GITHUB_STEP_SUMMARY
+          echo "⏱️ **Duration:** ${{ env.INTEGRATION_DURATION }}ms" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Test Environment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Node.js:** ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **PostgreSQL:** ${{ inputs.postgres-version }} with PostGIS extensions" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Pattern:** \`**/*.acceptance.ts\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Timeout:** ${{ inputs.test-timeout }}ms" >> $GITHUB_STEP_SUMMARY
+          echo "- **Database URL:** \`postgresql://test:***@localhost:5432/buuk_test\`" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f integration-test-results.json ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Test Results Details" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat integration-test-results.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail if integration tests failed
+        if: env.INTEGRATION_SUCCESS != 'true'
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "❌ Integration tests failed"
+          echo "Summary: ${{ env.INTEGRATION_SUMMARY }}"
+          echo "Results: ${{ env.INTEGRATION_PASSED }} passed, ${{ env.INTEGRATION_FAILED }} failed"
+          exit 1
