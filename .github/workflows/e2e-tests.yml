@@ -74,15 +74,49 @@ jobs:
           path: frontend
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Debug token availability
+      - name: Debug token and repository access
         run: |
-          echo "🔍 Debugging token availability..."
+          echo "🔍 Debugging token and repository access..."
+          
+          # Check if token is available
           if [ -z "${{ secrets.BUUK_ACCESS_TOKEN }}" ]; then
             echo "❌ BUUK_ACCESS_TOKEN is empty or not set"
             exit 1
           else
             echo "✅ BUUK_ACCESS_TOKEN is available (length: ${#BUUK_ACCESS_TOKEN})"
           fi
+          
+          # Test repository access with GitHub API
+          echo "🔍 Testing repository access..."
+          REPO_ACCESS_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token $BUUK_ACCESS_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/BuukGroup/buuk-server")
+          
+          echo "Repository API response code: $REPO_ACCESS_RESPONSE"
+          
+          if [ "$REPO_ACCESS_RESPONSE" = "200" ]; then
+            echo "✅ Token has access to BuukGroup/buuk-server"
+          elif [ "$REPO_ACCESS_RESPONSE" = "404" ]; then
+            echo "❌ Token does not have access to BuukGroup/buuk-server (404 - repo not found or no access)"
+            echo "💡 Check: 1) Token scope includes 'repo', 2) Token owner has access to repository, 3) Token is authorized for BuukGroup organization"
+            exit 1
+          elif [ "$REPO_ACCESS_RESPONSE" = "401" ]; then
+            echo "❌ Token is invalid or expired (401 unauthorized)"
+            exit 1
+          else
+            echo "❌ Unexpected API response: $REPO_ACCESS_RESPONSE"
+            exit 1
+          fi
+          
+          # Test getting repository info
+          echo "🔍 Testing repository details fetch..."
+          curl -s -H "Authorization: token $BUUK_ACCESS_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/BuukGroup/buuk-server" \
+            | jq -r '.name, .private, .default_branch' \
+            || echo "Failed to fetch repository details"
+            
         env:
           BUUK_ACCESS_TOKEN: ${{ secrets.BUUK_ACCESS_TOKEN }}
 
