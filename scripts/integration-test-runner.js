@@ -10,7 +10,7 @@
  *   node integration-test-runner.js [options]
  * 
  * Options:
- *   --pattern         Test file pattern (default: *\*/*\.acceptance.ts)
+ *   --pattern         Test file pattern (default: glob pattern for .acceptance.ts files)
  *   --database-url    PostgreSQL connection URL
  *   --coverage        Enable coverage collection
  *   --timeout         Test timeout in milliseconds (default: 30000)
