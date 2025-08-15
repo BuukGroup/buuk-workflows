@@ -167,8 +167,6 @@ jobs:
         working-directory: backend
         env:
           NODE_ENV: development
-          E2E_TEST: true
-          E2E_MODE: true
           HOST: 0.0.0.0
           PORT: 8080
           DB_HOST: localhost
@@ -213,9 +211,8 @@ jobs:
           echo "🚀 Starting backend server..."
           echo "🔍 E2E Environment Check:"
           echo "  NODE_ENV: $NODE_ENV"
-          echo "  E2E_TEST: $E2E_TEST"
-          echo "  E2E_MODE: $E2E_MODE"
-          echo "  STRIPE_API_KEY: ${STRIPE_API_KEY:0:15}..." # Show first 15 chars
+          echo "  STRIPE_API_KEY: ${STRIPE_API_KEY:0:15}..." # Show first 15 chars to verify mock key
+          echo "  API URL will be: http://localhost:8080/api/v1/"
           
           npm run dev &
           SERVER_PID=$!
