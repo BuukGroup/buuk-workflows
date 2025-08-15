@@ -4,23 +4,7 @@
  * Integration Test Runner Script
  * 
  * Runs integration tests (*.acceptance.ts) for LoopBack 4 backend with proper database setup.
- * Handles PostgreSQL connection, test execution, and result reporting.
- * 
- * Usage:
- *   node integration-test-runner.js [options]
- * 
- * Options:
- *   --pattern         Test file pattern (default: glob pattern for .acceptance.ts files)
- *   --database-url    PostgreSQL connection URL
- *   --coverage        Enable coverage collection
- *   --timeout         Test timeout in milliseconds (default: 30000)
- *   --verbose         Enable verbose output
- *   --bail            Stop on first test failure
- * 
- * Environment Variables:
- *   NODE_ENV                 Should be 'test' for integration tests
- *   TEST_DATABASE_URL        PostgreSQL connection URL for tests
- *   CI                       Set to 'true' in CI environment
+ * Uses custom Jest config to avoid conflicts with unit test config.
  */
 
 const { execSync, spawn } = require('child_process');
@@ -56,96 +40,63 @@ function log(message, level = 'info') {
   console.log(`${prefix} [${timestamp}] ${message}`);
 }
 
-function validateEnvironment() {
-  log('Validating environment for integration tests...');
+function createIntegrationJestConfig() {
+  log('Creating custom Jest config for integration tests...');
   
-  // Check Node.js version
-  const nodeVersion = process.version;
-  log(`Node.js version: ${nodeVersion}`);
+  const integrationConfig = {
+    preset: 'ts-jest',
+    testEnvironment: 'node',
+    testMatch: ['**/*.acceptance.ts'],
+    testTimeout: options.timeout,
+    setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+    moduleNameMapper: {
+      '^@/(.*)$': '<rootDir>/src/$1'
+    },
+    transform: {
+      '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }]
+    },
+    moduleFileExtensions: ['ts', 'js', 'json'],
+    verbose: true,
+    detectOpenHandles: true,
+    forceExit: true,
+    testPathIgnorePatterns: [
+      '<rootDir>/node_modules/',
+      '<rootDir>/src/__tests__/fixtures/',
+      '<rootDir>/src/__tests__/__samples__/',
+      '<rootDir>/src/__tests__/helpers/'
+    ]
+  };
   
-  if (!nodeVersion.startsWith('v24.')) {
-    log('Warning: Expected Node.js 24.x, consider upgrading', 'warning');
+  if (options.coverage) {
+    integrationConfig.collectCoverage = true;
+    integrationConfig.coverageDirectory = 'coverage-integration';
+    integrationConfig.collectCoverageFrom = [
+      'src/**/*.ts',
+      '!src/**/*.d.ts',
+      '!src/__tests__/**',
+      '!src/migrate.ts',
+      '!src/index.ts',
+      '!src/openapi-spec.ts',
+      '!src/datasources/*.ts',
+      '!src/keys.ts'
+    ];
   }
   
-  // Set NODE_ENV to test if not already set
-  if (!process.env.NODE_ENV) {
-    process.env.NODE_ENV = 'test';
-    log('Set NODE_ENV=test');
-  } else if (process.env.NODE_ENV !== 'test') {
-    log(`Warning: NODE_ENV is '${process.env.NODE_ENV}', expected 'test'`, 'warning');
-  }
+  // Write temporary config file
+  const configPath = 'jest.integration.config.js';
+  const configContent = `module.exports = ${JSON.stringify(integrationConfig, null, 2)};`;
+  fs.writeFileSync(configPath, configContent);
   
-  // Validate database URL
-  if (!options.databaseUrl) {
-    log('Database URL not provided, using default PostgreSQL connection', 'warning');
-    options.databaseUrl = 'postgresql://postgres:postgres@localhost:5432/buukdb';
-  }
-  
-  // Set database URL environment variable
-  process.env.TEST_DATABASE_URL = options.databaseUrl;
-  log(`Database URL: ${options.databaseUrl.replace(/\/\/.*@/, '//***@')}`);
-  
-  // Check if in CI environment
-  if (process.env.CI) {
-    log('Running in CI environment');
-  }
-}
-
-function findTestFiles() {
-  log(`Searching for test files with pattern: ${options.pattern}`);
-  
-  try {
-    // Use glob-like pattern with find command
-    const testFiles = execSync(
-      `find . -name "*.acceptance.ts" -type f | grep -E "(src|__tests__)" | head -20`,
-      { encoding: 'utf8', stdio: 'pipe' }
-    ).trim().split('\n').filter(Boolean);
-    
-    if (testFiles.length === 0) {
-      log('No integration test files found!', 'warning');
-      return [];
-    }
-    
-    log(`Found ${testFiles.length} integration test files:`);
-    testFiles.forEach(file => log(`  - ${file}`, 'debug'));
-    
-    return testFiles;
-  } catch (error) {
-    log(`Error finding test files: ${error.message}`, 'error');
-    return [];
-  }
-}
-
-function checkDatabaseConnection() {
-  log('Checking database connection...');
-  
-  const { URL } = require('url');
-  
-  try {
-    const dbUrl = new URL(options.databaseUrl);
-    const host = dbUrl.hostname;
-    const port = dbUrl.port || 5432;
-    const database = dbUrl.pathname.slice(1);
-    
-    // Test PostgreSQL connection using pg_isready if available
-    try {
-      execSync(`pg_isready -h ${host} -p ${port} -U ${dbUrl.username} -d ${database}`, 
-        { stdio: 'pipe', timeout: 5000 });
-      log('Database connection test passed', 'success');
-      return true;
-    } catch (pgError) {
-      log('pg_isready not available or connection failed, continuing anyway...', 'warning');
-      return true; // Continue anyway, Jest will handle connection errors
-    }
-  } catch (error) {
-    log(`Database URL parsing error: ${error.message}`, 'error');
-    return false;
-  }
+  log(`Created temporary Jest config: ${configPath}`);
+  return configPath;
 }
 
 function buildJestCommand() {
+  // Create and use custom config for integration tests
+  const configPath = createIntegrationJestConfig();
+  
   const jestArgs = [
-    '--testMatch="**/*.acceptance.ts"',
+    `--config=${configPath}`,
     `--testTimeout=${options.timeout}`,
     '--verbose',
     '--detectOpenHandles',
@@ -166,11 +117,87 @@ function buildJestCommand() {
     jestArgs.push('--watchman=false');
   }
   
-  // Use npx jest to ensure we're using the project's Jest configuration
   return `npx jest ${jestArgs.join(' ')}`;
 }
 
-function runIntegrationTests() {
+function validateEnvironment() {
+  log('Validating environment for integration tests...');
+  
+  const nodeVersion = process.version;
+  log(`Node.js version: ${nodeVersion}`);
+  
+  if (!nodeVersion.startsWith('v24.')) {
+    log('Warning: Expected Node.js 24.x, consider upgrading', 'warning');
+  }
+  
+  if (!process.env.NODE_ENV) {
+    process.env.NODE_ENV = 'test';
+    log('Set NODE_ENV=test');
+  }
+  
+  if (!options.databaseUrl) {
+    log('Database URL not provided, using default PostgreSQL connection', 'warning');
+    options.databaseUrl = 'postgresql://postgres:postgres@localhost:5432/buukdb';
+  }
+  
+  process.env.TEST_DATABASE_URL = options.databaseUrl;
+  log(`Database URL: ${options.databaseUrl.replace(/\\/\\/.*@/, '//***@')}`);
+  
+  if (process.env.CI) {
+    log('Running in CI environment');
+  }
+}
+
+function findTestFiles() {
+  log(`Searching for test files with pattern: ${options.pattern}`);
+  
+  try {
+    const testFiles = execSync(
+      `find . -name "*.acceptance.ts" -type f | grep -E "(src|__tests__)" | head -20`,
+      { encoding: 'utf8', stdio: 'pipe' }
+    ).trim().split('\\n').filter(Boolean);
+    
+    if (testFiles.length === 0) {
+      log('No integration test files found!', 'warning');
+      return [];
+    }
+    
+    log(`Found ${testFiles.length} integration test files:`);
+    testFiles.forEach(file => log(`  - ${file}`, 'debug'));
+    
+    return testFiles;
+  } catch (error) {
+    log(`Error finding test files: ${error.message}`, 'error');
+    return [];
+  }
+}
+
+function checkDatabaseConnection() {
+  log('Checking database connection...');
+  
+  try {
+    const { URL } = require('url');
+    const dbUrl = new URL(options.databaseUrl);
+    const host = dbUrl.hostname;
+    const port = dbUrl.port || 5432;
+    const database = dbUrl.pathname.slice(1);
+    
+    try {
+      execSync(`pg_isready -h ${host} -p ${port} -U ${dbUrl.username} -d ${database}`, 
+        { stdio: 'pipe', timeout: 5000 });
+      log('Database connection test passed', 'success');
+      return true;
+    } catch (pgError) {
+      log('pg_isready not available or connection failed, continuing anyway...', 'warning');
+      return true;
+    }
+  } catch (error) {
+    log(`Database URL parsing error: ${error.message}`, 'error');
+    return false;
+  }
+}
+
+async function runIntegrationTests() {
   return new Promise((resolve, reject) => {
     log('Starting integration tests...');
     
@@ -179,14 +206,12 @@ function runIntegrationTests() {
     
     const startTime = Date.now();
     
-    // Run Jest with real-time output
     const child = spawn('npx', ['jest', ...buildJestCommand().split(' ').slice(2)], {
       stdio: 'pipe',
       env: {
         ...process.env,
         NODE_ENV: 'test',
         TEST_DATABASE_URL: options.databaseUrl,
-        // Force colors in CI
         FORCE_COLOR: '1'
       }
     });
@@ -213,10 +238,16 @@ function runIntegrationTests() {
     child.on('close', (code) => {
       const duration = Date.now() - startTime;
       
+      // Cleanup temporary config file
+      try {
+        fs.unlinkSync('jest.integration.config.js');
+      } catch (cleanupError) {
+        log('Could not cleanup temporary config file', 'warning');
+      }
+      
       if (code === 0) {
         log(`Integration tests completed successfully in ${duration}ms`, 'success');
         
-        // Parse test results if possible
         const testResults = parseJestOutput(stdout);
         if (testResults) {
           log(`Test Summary: ${testResults.passed} passed, ${testResults.failed} failed, ${testResults.total} total`);
@@ -233,8 +264,7 @@ function runIntegrationTests() {
       } else {
         log(`Integration tests failed with exit code ${code}`, 'error');
         
-        // Show last few lines of output for debugging
-        const errorLines = stderr.split('\n').slice(-10).join('\n');
+        const errorLines = stderr.split('\\n').slice(-10).join('\\n');
         if (errorLines.trim()) {
           log('Last error output:', 'debug');
           log(errorLines, 'debug');
@@ -263,8 +293,7 @@ function runIntegrationTests() {
 
 function parseJestOutput(output) {
   try {
-    // Look for Jest summary line
-    const summaryMatch = output.match(/Tests:\s+(\d+)\s+failed,\s+(\d+)\s+passed,\s+(\d+)\s+total/);
+    const summaryMatch = output.match(/Tests:\\s+(\\d+)\\s+failed,\\s+(\\d+)\\s+passed,\\s+(\\d+)\\s+total/);
     if (summaryMatch) {
       return {
         failed: parseInt(summaryMatch[1]),
@@ -273,8 +302,7 @@ function parseJestOutput(output) {
       };
     }
     
-    // Alternative pattern
-    const altMatch = output.match(/(\d+)\s+passing/);
+    const altMatch = output.match(/(\\d+)\\s+passing/);
     if (altMatch) {
       return {
         failed: 0,
@@ -302,11 +330,10 @@ function generateSummary(results) {
       nodeVersion: process.version,
       nodeEnv: process.env.NODE_ENV,
       ci: !!process.env.CI,
-      databaseUrl: options.databaseUrl.replace(/\/\/.*@/, '//***@')
+      databaseUrl: options.databaseUrl.replace(/\\/\\/.*@/, '//***@')
     }
   };
   
-  // Write summary to file for GitHub Actions
   try {
     fs.writeFileSync('integration-test-results.json', JSON.stringify(summary, null, 2));
     log('Test summary written to integration-test-results.json', 'success');
@@ -322,37 +349,28 @@ async function main() {
     log('🧪 Buuk Integration Test Runner');
     log('================================');
     
-    // Validate environment
     validateEnvironment();
     
-    // Find test files
     const testFiles = findTestFiles();
     if (testFiles.length === 0) {
       log('No integration tests to run', 'warning');
       process.exit(0);
     }
     
-    // Check database connection
     if (!checkDatabaseConnection()) {
       log('Database connection check failed', 'error');
       process.exit(1);
     }
     
-    // Run integration tests
     const results = await runIntegrationTests();
-    
-    // Generate summary
-    const summary = generateSummary(results);
+    generateSummary(results);
     
     log('Integration test execution completed', 'success');
-    
-    // Exit with appropriate code
     process.exit(results.success ? 0 : 1);
     
   } catch (error) {
     log(`Integration test runner failed: ${error.message || error.error}`, 'error');
     
-    // Generate failure summary
     const failureSummary = {
       timestamp: new Date().toISOString(),
       success: false,
@@ -374,36 +392,6 @@ async function main() {
   }
 }
 
-// Show usage if no arguments and not in CI
-if (args.length === 0 && !process.env.CI) {
-  console.log(`
-Buuk Integration Test Runner
-
-Usage: node integration-test-runner.js [options]
-
-Options:
-  --pattern         Test file pattern (default: **/*.acceptance.ts)
-  --database-url    PostgreSQL connection URL
-  --coverage        Enable coverage collection
-  --timeout         Test timeout in milliseconds (default: 30000)
-  --verbose         Enable verbose output
-  --bail            Stop on first test failure
-  --help            Show this help message
-
-Environment Variables:
-  NODE_ENV                 Should be 'test' for integration tests
-  TEST_DATABASE_URL        PostgreSQL connection URL for tests
-  CI                       Set to 'true' in CI environment
-
-Examples:
-  node integration-test-runner.js --verbose --coverage
-  node integration-test-runner.js --database-url postgresql://user:pass@localhost:5432/testdb
-  node integration-test-runner.js --pattern "src/**/*.acceptance.ts" --bail
-`);
-  process.exit(0);
-}
-
-// Run the script
 if (require.main === module) {
   main();
 }
