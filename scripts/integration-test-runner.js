@@ -278,7 +278,7 @@ function generateSummary(results) {
       nodeVersion: process.version,
       nodeEnv: process.env.NODE_ENV,
       ci: !!process.env.CI,
-      databaseUrl: options.databaseUrl.replace(/\\/\\/.*@/, '//***@')
+      databaseUrl: options.databaseUrl.replace(/\/\/.*@/, '//***@')
     }
   };
   
