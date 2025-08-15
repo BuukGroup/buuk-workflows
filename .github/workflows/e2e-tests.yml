@@ -74,6 +74,18 @@ jobs:
           path: frontend
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Debug token availability
+        run: |
+          echo "🔍 Debugging token availability..."
+          if [ -z "${{ secrets.BUUK_ACCESS_TOKEN }}" ]; then
+            echo "❌ BUUK_ACCESS_TOKEN is empty or not set"
+            exit 1
+          else
+            echo "✅ BUUK_ACCESS_TOKEN is available (length: ${#BUUK_ACCESS_TOKEN})"
+          fi
+        env:
+          BUUK_ACCESS_TOKEN: ${{ secrets.BUUK_ACCESS_TOKEN }}
+
       - name: Checkout backend code
         uses: actions/checkout@v4
         with:
