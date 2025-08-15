@@ -4,41 +4,41 @@ on:
   workflow_call:
     inputs:
       node-version:
-        description: 'Node.js version to use'
+        description: "Node.js version to use"
         required: false
         type: string
-        default: '24'
+        default: "24"
       frontend-repo:
-        description: 'Frontend repository (owner/repo format)'
+        description: "Frontend repository (owner/repo format)"
         required: true
         type: string
       backend-repo:
-        description: 'Backend repository (owner/repo format)'  
+        description: "Backend repository (owner/repo format)"
         required: true
         type: string
       frontend-ref:
-        description: 'Frontend branch/ref to checkout'
+        description: "Frontend branch/ref to checkout"
         required: false
         type: string
-        default: 'main'
+        default: "main"
       backend-ref:
-        description: 'Backend branch/ref to checkout'
+        description: "Backend branch/ref to checkout"
         required: false
         type: string
-        default: 'main'
+        default: "main"
       postgres-version:
-        description: 'PostgreSQL version to use'
+        description: "PostgreSQL version to use"
         required: false
         type: string
-        default: '15'
+        default: "15"
       test-timeout:
-        description: 'Test timeout in minutes'
+        description: "Test timeout in minutes"
         required: false
         type: number
         default: 30
     secrets:
       BUUK_ACCESS_TOKEN:
-        description: 'Token for accessing private repositories'
+        description: "Token for accessing private repositories"
         required: true
 
 jobs:
@@ -77,7 +77,7 @@ jobs:
       - name: Debug token and repository access
         run: |
           echo "🔍 Debugging token and repository access..."
-          
+
           # Check if token is available
           if [ -z "${{ secrets.BUUK_ACCESS_TOKEN }}" ]; then
             echo "❌ BUUK_ACCESS_TOKEN is empty or not set"
@@ -85,16 +85,16 @@ jobs:
           else
             echo "✅ BUUK_ACCESS_TOKEN is available (length: ${#BUUK_ACCESS_TOKEN})"
           fi
-          
+
           # Test repository access with GitHub API
           echo "🔍 Testing repository access..."
           REPO_ACCESS_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token $BUUK_ACCESS_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/BuukGroup/buuk-server")
-          
+
           echo "Repository API response code: $REPO_ACCESS_RESPONSE"
-          
+
           if [ "$REPO_ACCESS_RESPONSE" = "200" ]; then
             echo "✅ Token has access to BuukGroup/buuk-server"
           elif [ "$REPO_ACCESS_RESPONSE" = "404" ]; then
@@ -108,7 +108,7 @@ jobs:
             echo "❌ Unexpected API response: $REPO_ACCESS_RESPONSE"
             exit 1
           fi
-          
+
           # Test getting repository info
           echo "🔍 Testing repository details fetch..."
           curl -s -H "Authorization: token $BUUK_ACCESS_TOKEN" \
@@ -116,7 +116,7 @@ jobs:
             "https://api.github.com/repos/BuukGroup/buuk-server" \
             | jq -r '.name, .private, .default_branch' \
             || echo "Failed to fetch repository details"
-            
+
         env:
           BUUK_ACCESS_TOKEN: ${{ secrets.BUUK_ACCESS_TOKEN }}
 
@@ -132,7 +132,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: 'npm'
+          cache: "npm"
           cache-dependency-path: |
             backend/package-lock.json
             frontend/package-lock.json
@@ -174,13 +174,12 @@ jobs:
           DB_USER: postgres
           DB_PASSWORD: postgres
           DB_DATABASE: buukdb
-          JWT_SECRET: 'test1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6'
-          JWT_REFRESH_SECRET: 'testc2d3e4f5g6h7i8j9k0l1m2n3o4p5q6'
-          LOCAL_FILE_HOST: 'http://localhost:8080/api/v1/uploads'
-          CORS_ORIGIN: 'http://localhost:3000/'
+          JWT_SECRET: "test1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
+          JWT_REFRESH_SECRET: "testc2d3e4f5g6h7i8j9k0l1m2n3o4p5q6"
+          LOCAL_FILE_HOST: "http://localhost:8080/api/v1/uploads"
+          CORS_ORIGIN: "http://localhost:3000/"
           MAX_FILE_SIZE: 5000000
           FILES_LIMIT_NUMBER: 10
-          # E2E Mock service credentials
           IMAGEKIT_PUBLIC_KEY: public_TEST_E2E_KEY
           IMAGEKIT_PRIVATE_KEY: private_TEST_E2E_KEY
           IMAGEKIT_URL_ENDPOINT: https://ik.imagekit.io/test-e2e
@@ -199,7 +198,6 @@ jobs:
           GOOGLE_CLIENT_ID: test-client-id.apps.googleusercontent.com
           GOOGLE_CLIENT_SECRET: TEST-E2E-CLIENT-SECRET
           GOOGLE_REDIRECT_URI: http://localhost:3000
-          # Ensure PostgreSQL connection uses correct user
           PGUSER: postgres
           PGPASSWORD: postgres
           PGHOST: localhost
@@ -220,15 +218,15 @@ jobs:
           echo "🔍 All Environment Variables (for backend debug):"
           env | grep -E "(NODE_ENV|STRIPE|JWT|DB_|DATABASE|CORS|API)" | sort
           echo ""
-          
+
           echo "📋 Starting backend with debug logging..."
           npm run dev 2>&1 &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
-          
+
           # Give server a moment to start and show any immediate errors
           sleep 3
-          
+
           # Check if process is still running
           if ! kill -0 $SERVER_PID 2>/dev/null; then
             echo "❌ Backend server died during startup!"
@@ -255,7 +253,7 @@ jobs:
             echo "Attempt $i/60 - waiting for backend..."
             sleep 2
           done
-          
+
           # Test backend E2E mode detection
           echo "🔍 Testing backend E2E mode detection..."
           echo "📋 Health check response:"
@@ -281,7 +279,7 @@ jobs:
           NEXT_PUBLIC_ENVIRONMENT: development
           NEXT_PUBLIC_E2E_TEST: true
           BASE_URL: http://localhost:3000
-          LAUNCH_WEB_SERVER: '0'
+          LAUNCH_WEB_SERVER: "0"
         run: |
           echo "🏗️ Building frontend..."
           npm run build
@@ -295,7 +293,6 @@ jobs:
       - name: Start frontend server and run E2E tests
         working-directory: frontend
         env:
-          NODE_ENV: development
           NEXT_PUBLIC_API_PROTOCOL: http
           NEXT_PUBLIC_API_HOST: localhost
           NEXT_PUBLIC_API_PREFIX: api
@@ -307,11 +304,11 @@ jobs:
           NEXT_PUBLIC_ENVIRONMENT: development
           NEXT_PUBLIC_E2E_TEST: true
           BASE_URL: http://localhost:3000
-          LAUNCH_WEB_SERVER: '0'
+          LAUNCH_WEB_SERVER: "0"
           CI: true
         run: |
           echo "🚀 Starting frontend server..."
-          
+
           # Create log files
           FRONTEND_LOG="frontend-server.log"
           FRONTEND_ERROR_LOG="frontend-errors.log"
@@ -338,7 +335,7 @@ jobs:
             # Test server responsiveness
             if curl -f http://localhost:3000 >/dev/null 2>&1; then
               echo "✅ Frontend server is ready (attempt $i)"
-              
+
               # Test the signup page specifically
               if curl -f "http://localhost:3000/signup?e2e_test=true" >/dev/null 2>&1; then
                 echo "✅ Signup page is accessible"
@@ -385,19 +382,19 @@ jobs:
         working-directory: frontend
         run: |
           echo "📊 Parsing E2E test results..."
-          
+
           if [ -f "playwright-report/results.json" ]; then
             echo "📋 E2E test results found"
-            
+
             # Extract results using Node.js
             node -e "
               try {
                 const results = require('./playwright-report/results.json');
                 console.log('E2E_SUCCESS=true');
-                
+
                 // Parse Playwright JSON report structure
                 let failed = 0, passed = 0, skipped = 0;
-                
+
                 if (results.stats) {
                   failed = results.stats.failed || results.stats.unexpected || 0;
                   passed = results.stats.passed || results.stats.expected || 0;
@@ -424,14 +421,14 @@ jobs:
                   }
                   results.suites.forEach(countTests);
                 }
-                
+
                 const total = failed + passed + skipped;
-                
+
                 console.log('E2E_PASSED=' + passed);
                 console.log('E2E_FAILED=' + failed);
                 console.log('E2E_SKIPPED=' + skipped);
                 console.log('E2E_TOTAL=' + total);
-                
+
                 if (failed > 0) {
                   console.log('E2E_SUCCESS=false');
                   console.log('E2E_SUMMARY=' + failed + ' test(s) failed out of ' + total + ' total tests');
@@ -447,7 +444,7 @@ jobs:
                 console.log('E2E_TOTAL=0');
               }
             " >> $GITHUB_ENV
-            
+
             echo "✅ E2E test results parsed"
           else
             echo "⚠️ No E2E test results file found"
@@ -472,7 +469,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           STATUS="${{ env.E2E_SUCCESS == 'true' && 'success' || 'failure' }}"
-          
+
           # Create detailed test information
           TEST_DETAILS=$(cat << EOF
           {
@@ -494,7 +491,7 @@ jobs:
           }
           EOF
           )
-          
+
           node pr-commenter.js \
             --type e2e \
             --status "$STATUS" \
@@ -533,19 +530,19 @@ jobs:
         if: always()
         run: |
           echo "🧹 Cleaning up background processes..."
-          
+
           # Kill frontend server
           if [ ! -z "$FRONTEND_PID" ]; then
             kill $FRONTEND_PID 2>/dev/null || true
             echo "Frontend server stopped"
           fi
-          
+
           # Kill backend server
           if [ ! -z "$SERVER_PID" ]; then
             kill $SERVER_PID 2>/dev/null || true
             echo "Backend server stopped"
           fi
-          
+
           # Kill any remaining Node processes on our ports
           lsof -ti:3000 | xargs kill -9 2>/dev/null || true
           lsof -ti:8080 | xargs kill -9 2>/dev/null || true
@@ -555,16 +552,16 @@ jobs:
         run: |
           echo "## 🎭 E2E Test Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           if [ "${{ env.E2E_SUCCESS }}" = "true" ]; then
             echo "✅ **Status:** Passed" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ **Status:** Failed" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           echo "📊 **Results:** ${{ env.E2E_PASSED }} passed, ${{ env.E2E_FAILED }} failed, ${{ env.E2E_SKIPPED }} skipped, ${{ env.E2E_TOTAL }} total" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### Test Environment" >> $GITHUB_STEP_SUMMARY
           echo "- **Frontend Repository:** ${{ inputs.frontend-repo }}@${{ inputs.frontend-ref }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Backend Repository:** ${{ inputs.backend-repo }}@${{ inputs.backend-ref }}" >> $GITHUB_STEP_SUMMARY
@@ -574,7 +571,7 @@ jobs:
           echo "- **Frontend URL:** http://localhost:3000" >> $GITHUB_STEP_SUMMARY
           echo "- **Browser:** Chromium (Playwright)" >> $GITHUB_STEP_SUMMARY
           echo "- **E2E Mode:** Enabled (mocked emails, Stripe)" >> $GITHUB_STEP_SUMMARY
-          
+
           if [ -f frontend/playwright-report/results.json ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Test Results Details" >> $GITHUB_STEP_SUMMARY
