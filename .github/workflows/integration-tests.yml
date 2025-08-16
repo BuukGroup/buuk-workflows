@@ -4,26 +4,25 @@ on:
   workflow_call:
     inputs:
       node-version:
-        description: 'Node.js version to use'
+        description: "Node.js version to use"
         required: false
         type: string
-        default: '24'
+        default: "24"
       working-directory:
-        description: 'Working directory for the project'
+        description: "Working directory for the project"
         required: false
         type: string
-        default: '.'
+        default: "."
       test-timeout:
-        description: 'Test timeout in milliseconds'
+        description: "Test timeout in milliseconds"
         required: false
         type: number
         default: 30000
       postgres-version:
-        description: 'PostgreSQL version to use'
+        description: "PostgreSQL version to use"
         required: false
         type: string
-        default: '14'
-
+        default: "14"
 
 jobs:
   integration-tests:
@@ -37,7 +36,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:${{ inputs.postgres-version }}
+        image: postgis/postgis:${{ inputs.postgres-version }}-3.4
         env:
           POSTGRES_PASSWORD: test
           POSTGRES_USER: test
@@ -60,7 +59,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: 'npm'
+          cache: "npm"
           cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
 
       - name: Install system dependencies
@@ -84,6 +83,21 @@ jobs:
       - name: Build project
         working-directory: ${{ inputs.working-directory }}
         run: npm run build
+
+      - name: Run DB migrations
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: test
+          DB_PASSWORD: test
+          DB_DATABASE: buuk_test
+          PGUSER: test
+          PGPASSWORD: test
+          PGHOST: localhost
+          PGPORT: 5432
+          PGDATABASE: buuk_test
+        run: npm run migrate
 
       - name: Download integration test runner
         working-directory: ${{ inputs.working-directory }}
@@ -115,7 +129,7 @@ jobs:
           echo "   Database: $TEST_DATABASE_URL"
           echo "   Working Directory: ${{ inputs.working-directory }}"
           echo "   Test Timeout: ${{ inputs.test-timeout }}ms"
-          
+
           # Run integration tests with the custom runner
           node integration-test-runner.js \
             --pattern "**/*.acceptance.ts" \
@@ -130,14 +144,14 @@ jobs:
         run: |
           if [ -f integration-test-results.json ]; then
             echo "📊 Integration test results found"
-            
+
             # Extract results using Node.js
             node -e "
               try {
                 const results = require('./integration-test-results.json');
                 console.log('INTEGRATION_SUCCESS=' + results.success);
                 console.log('INTEGRATION_DURATION=' + (results.duration || 0));
-                
+
                 if (results.results) {
                   console.log('INTEGRATION_PASSED=' + (results.results.passed || 0));
                   console.log('INTEGRATION_FAILED=' + (results.results.failed || 0));
@@ -147,9 +161,9 @@ jobs:
                   console.log('INTEGRATION_FAILED=0');
                   console.log('INTEGRATION_TOTAL=0');
                 }
-                
+
                 // Generate summary for PR comment
-                const summary = results.success 
+                const summary = results.success
                   ? 'All integration tests passed successfully!'
                   : 'Integration tests failed - check logs for details';
                 console.log('INTEGRATION_SUMMARY=' + summary);
@@ -162,7 +176,7 @@ jobs:
                 console.log('INTEGRATION_DURATION=0');
               }
             " >> $GITHUB_ENV
-            
+
             echo "✅ Integration test results parsed"
           else
             echo "⚠️ No integration test results file found"
@@ -189,7 +203,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           STATUS="${{ env.INTEGRATION_SUCCESS == 'true' && 'success' || 'failure' }}"
-          
+
           # Create detailed test information
           TEST_DETAILS=$(cat << EOF
           {
@@ -208,7 +222,7 @@ jobs:
           }
           EOF
           )
-          
+
           node pr-commenter.js \
             --type e2e \
             --status "$STATUS" \
@@ -240,24 +254,24 @@ jobs:
         run: |
           echo "## 🧪 Integration Test Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           if [ "${{ env.INTEGRATION_SUCCESS }}" = "true" ]; then
             echo "✅ **Status:** Passed" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ **Status:** Failed" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           echo "📊 **Results:** ${{ env.INTEGRATION_PASSED }} passed, ${{ env.INTEGRATION_FAILED }} failed, ${{ env.INTEGRATION_TOTAL }} total" >> $GITHUB_STEP_SUMMARY
           echo "⏱️ **Duration:** ${{ env.INTEGRATION_DURATION }}ms" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### Test Environment" >> $GITHUB_STEP_SUMMARY
           echo "- **Node.js:** ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **PostgreSQL:** ${{ inputs.postgres-version }} with PostGIS extensions" >> $GITHUB_STEP_SUMMARY
           echo "- **Test Pattern:** \`**/*.acceptance.ts\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Test Timeout:** ${{ inputs.test-timeout }}ms" >> $GITHUB_STEP_SUMMARY
           echo "- **Database URL:** \`postgresql://test:***@localhost:5432/buuk_test\`" >> $GITHUB_STEP_SUMMARY
-          
+
           if [ -f integration-test-results.json ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Test Results Details" >> $GITHUB_STEP_SUMMARY

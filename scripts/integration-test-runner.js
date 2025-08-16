@@ -104,6 +104,26 @@ function validateEnvironment() {
   process.env.TEST_DATABASE_URL = options.databaseUrl;
   log(`Database URL: ${options.databaseUrl.replace(/\/\/.*@/, "//***@")}`);
 
+  // Ensure LoopBack datasource (buukdb) picks up correct connection from TEST_DATABASE_URL
+  try {
+    const { URL } = require("url");
+    const db = new URL(options.databaseUrl);
+    process.env.DB_HOST = process.env.DB_HOST || db.hostname;
+    process.env.DB_PORT = process.env.DB_PORT || db.port || "5432";
+    process.env.DB_USER =
+      process.env.DB_USER || decodeURIComponent(db.username || "");
+    process.env.DB_PASSWORD =
+      process.env.DB_PASSWORD || decodeURIComponent(db.password || "");
+    process.env.DB_DATABASE =
+      process.env.DB_DATABASE || db.pathname.replace(/^\//, "");
+    log("Prepared DB_* environment variables for LoopBack datasource", "debug");
+  } catch (e) {
+    log(
+      `Failed to parse TEST_DATABASE_URL for DB_* env: ${e.message}`,
+      "warning",
+    );
+  }
+
   if (process.env.CI) {
     log("Running in CI environment");
   }
