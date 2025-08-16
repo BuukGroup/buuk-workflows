@@ -196,32 +196,30 @@ jobs:
           # Determine overall status
           STATUS="success"
 
-          # Create detailed build information
-          BUILD_DETAILS=$(cat << EOF
-          {
-            "buildDetails": "Backend build and linting completed successfully!",
-            "metrics": {
-              "buildSize": "${{ env.BUILD_SIZE }}",
-              "buildFiles": ${{ env.BUILD_FILES }},
-              "buildWarnings": ${{ env.BUILD_WARNINGS }},
-              "auditCritical": ${{ env.AUDIT_CRITICAL || 0 }},
-              "auditHigh": ${{ env.AUDIT_HIGH || 0 }},
-              "auditModerate": ${{ env.AUDIT_MODERATE || 0 }}
-            },
-            "environment": {
-              "nodeVersion": "${{ env.BUILD_NODE_VERSION }}",
-              "npmVersion": "${{ env.BUILD_NPM_VERSION }}",
-              "typescriptVersion": "${{ env.BUILD_TS_VERSION }}",
-              "workingDirectory": "${{ inputs.working-directory }}"
-            },
-            "checks": {
-              "linting": "✅ Passed",
-              "formatting": "✅ Passed",
-              "typecheck": "${{ inputs.run-typecheck && '✅ Passed' || '⏭️ Skipped' }}",
-              "build": "✅ Passed",
-              "audit": "${{ inputs.run-audit && '✅ Completed' || '⏭️ Skipped' }}"
-            }
-          }
+          # Collect audit summary
+          CRIT=${{ env.AUDIT_CRITICAL || 0 }}
+          HIGH=${{ env.AUDIT_HIGH || 0 }}
+          MOD=${{ env.AUDIT_MODERATE || 0 }}
+
+          # Compose PR comment body including audit results
+          BODY=$(cat << EOF
+          ## 🏗️ Backend Build & Lint Results
+
+          **Status:** ✅ Success
+          **Details:** Backend build and linting completed successfully!
+
+          ### 🔒 Security Audit
+          - Critical: $CRIT
+          - High: $HIGH
+          - Moderate: $MOD
+
+          ### Build Environment
+          - Node.js: ${{ env.BUILD_NODE_VERSION }}
+          - npm: ${{ env.BUILD_NPM_VERSION }}
+          - TypeScript: ${{ env.BUILD_TS_VERSION }}
+          - Working Directory: \`${{ inputs.working-directory }}\`
+
+          ---
           EOF
           )
 
@@ -229,7 +227,7 @@ jobs:
             --type build \
             --status "$STATUS" \
             --title "🏗️ Backend Build & Lint Results" \
-            --details "$BUILD_DETAILS"
+            --body "$BODY"
 
       - name: Upload build artifacts
         if: always()

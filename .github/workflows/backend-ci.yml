@@ -1,0 +1,62 @@
+name: Backend CI (Audit → Lint → Tests)
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Node.js version to use"
+        required: false
+        type: string
+        default: "22"
+      working-directory:
+        description: "Working directory for the backend project (e.g., buuk/buuk-server)"
+        required: false
+        type: string
+        default: "."
+      postgres-version:
+        description: "PostgreSQL version to use for integration tests"
+        required: false
+        type: string
+        default: "14"
+      test-timeout:
+        description: "Integration test timeout in milliseconds"
+        required: false
+        type: number
+        default: 30000
+      coverage-threshold:
+        description: "Coverage threshold for changed files in unit tests"
+        required: false
+        type: number
+        default: 20
+
+jobs:
+  audit_lint:
+    name: Security Audit, Lint, Typecheck, Build
+    uses: ./.github/workflows/backend-build-lint.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      working-directory: ${{ inputs.working-directory }}
+      run-audit: true
+      fail-on-audit: true
+      run-typecheck: true
+
+  unit_tests:
+    name: Unit Tests with Coverage
+    needs: audit_lint
+    uses: ./.github/workflows/unit-test-coverage.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      project-type: backend
+      coverage-threshold: ${{ inputs.coverage-threshold }}
+      working-directory: ${{ inputs.working-directory }}
+      database-required: false
+
+  integration_tests:
+    name: Integration (Acceptance) Tests
+    needs: audit_lint
+    uses: ./.github/workflows/integration-tests.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      working-directory: ${{ inputs.working-directory }}
+      postgres-version: ${{ inputs.postgres-version }}
+      test-timeout: ${{ inputs.test-timeout }}

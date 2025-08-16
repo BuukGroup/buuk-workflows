@@ -1,0 +1,63 @@
+name: Frontend CI (Audit → Lint → Unit Tests)
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Node.js version to use"
+        required: false
+        type: string
+        default: "24"
+      working-directory:
+        description: "Working directory for the frontend project (e.g., buuk/buuk-web)"
+        required: false
+        type: string
+        default: "."
+      coverage-threshold:
+        description: "Coverage threshold for changed files in unit tests"
+        required: false
+        type: number
+        default: 20
+      run-audit:
+        description: "Run npm security audit before anything else"
+        required: false
+        type: boolean
+        default: true
+      fail-on-audit:
+        description: "Fail immediately if audit finds issues at the configured level"
+        required: false
+        type: boolean
+        default: true
+      run-typecheck:
+        description: "Run TypeScript type checking during build/lint"
+        required: false
+        type: boolean
+        default: true
+      build-command:
+        description: "Build command to run during build/lint step"
+        required: false
+        type: string
+        default: "npm run build"
+
+jobs:
+  audit_lint:
+    name: Security Audit, Lint, Typecheck, Build
+    uses: ./.github/workflows/frontend-build-lint.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      working-directory: ${{ inputs.working-directory }}
+      run-audit: ${{ inputs.run-audit }}
+      fail-on-audit: ${{ inputs.fail-on-audit }}
+      run-typecheck: ${{ inputs.run-typecheck }}
+      build-command: ${{ inputs.build-command }}
+
+  unit_tests:
+    name: Unit Tests with Coverage
+    needs: audit_lint
+    uses: ./.github/workflows/unit-test-coverage.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      project-type: frontend
+      coverage-threshold: ${{ inputs.coverage-threshold }}
+      working-directory: ${{ inputs.working-directory }}
+      database-required: false

@@ -4,36 +4,35 @@ on:
   workflow_call:
     inputs:
       node-version:
-        description: 'Node.js version to use'
+        description: "Node.js version to use"
         required: false
         type: string
-        default: '24'
+        default: "24"
       working-directory:
-        description: 'Working directory for the project'
+        description: "Working directory for the project"
         required: false
         type: string
-        default: '.'
+        default: "."
       run-typecheck:
-        description: 'Run TypeScript type checking'
+        description: "Run TypeScript type checking"
         required: false
         type: boolean
         default: true
       run-audit:
-        description: 'Run npm security audit'
+        description: "Run npm security audit"
         required: false
         type: boolean
         default: true
       fail-on-audit:
-        description: 'Fail build on audit issues'
+        description: "Fail build on audit issues"
         required: false
         type: boolean
         default: false
       build-command:
-        description: 'Build command to run'
+        description: "Build command to run"
         required: false
         type: string
-        default: 'npm run build'
-
+        default: "npm run build"
 
 jobs:
   frontend-build-lint:
@@ -55,7 +54,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: 'npm'
+          cache: "npm"
           cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
 
       - name: Install dependencies
@@ -74,19 +73,19 @@ jobs:
           else
             npm audit --audit-level=high || echo "⚠️ Audit found issues but continuing..."
           fi
-          
+
           # Generate audit report for artifacts
           npm audit --json > audit-report.json || true
-          
+
           # Count vulnerabilities
           CRITICAL=$(cat audit-report.json | grep -o '"critical":[0-9]*' | cut -d':' -f2 | head -1 || echo "0")
           HIGH=$(cat audit-report.json | grep -o '"high":[0-9]*' | cut -d':' -f2 | head -1 || echo "0")
           MODERATE=$(cat audit-report.json | grep -o '"moderate":[0-9]*' | cut -d':' -f2 | head -1 || echo "0")
-          
+
           echo "AUDIT_CRITICAL=$CRITICAL" >> $GITHUB_ENV
           echo "AUDIT_HIGH=$HIGH" >> $GITHUB_ENV
           echo "AUDIT_MODERATE=$MODERATE" >> $GITHUB_ENV
-          
+
           echo "📊 Security audit summary:"
           echo "   Critical: $CRITICAL"
           echo "   High: $HIGH"
@@ -119,7 +118,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: |
           echo "🔧 Running TypeScript type check..."
-          
+
           # Check if there's a specific typecheck script
           if npm run typecheck > /dev/null 2>&1; then
             npm run typecheck
@@ -127,7 +126,7 @@ jobs:
             # Fallback to direct tsc
             npx tsc --noEmit --incremental false
           fi
-          
+
           echo "✅ TypeScript compilation passed"
 
       - name: Build project
@@ -147,41 +146,41 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: |
           echo "🔍 Verifying build output..."
-          
+
           # Check for Next.js build output
           if [ -d ".next" ]; then
             echo "✅ Next.js build directory '.next' exists"
-            
+
             # Check for static files
             if [ -d ".next/static" ]; then
               STATIC_COUNT=$(find .next/static -name "*.js" -o -name "*.css" | wc -l)
               echo "📊 Generated $STATIC_COUNT static assets"
               echo "BUILD_STATIC_FILES=$STATIC_COUNT" >> $GITHUB_ENV
             fi
-            
+
             # Check build manifest
             if [ -f ".next/build-manifest.json" ]; then
               echo "✅ Build manifest exists"
-              
+
               # Estimate build size
               BUILD_SIZE=$(du -sh .next | cut -f1)
               echo "📏 Build size: $BUILD_SIZE"
               echo "BUILD_SIZE=$BUILD_SIZE" >> $GITHUB_ENV
             fi
-          
+
           # Check for generic dist/build directory
           elif [ -d "dist" ] || [ -d "build" ]; then
             BUILD_DIR=$([ -d "dist" ] && echo "dist" || echo "build")
             echo "✅ Build directory '$BUILD_DIR' exists"
-            
+
             FILE_COUNT=$(find $BUILD_DIR -name "*.js" -o -name "*.css" -o -name "*.html" | wc -l)
             echo "📊 Generated $FILE_COUNT build files"
             echo "BUILD_FILES=$FILE_COUNT" >> $GITHUB_ENV
-            
+
             BUILD_SIZE=$(du -sh $BUILD_DIR | cut -f1)
             echo "📏 Build size: $BUILD_SIZE"
             echo "BUILD_SIZE=$BUILD_SIZE" >> $GITHUB_ENV
-          
+
           else
             echo "⚠️ No standard build directory found (expected .next, dist, or build)"
             # List current directory contents for debugging
@@ -194,22 +193,22 @@ jobs:
         if: hashFiles('next.config.*') != ''
         run: |
           echo "📊 Analyzing Next.js bundle..."
-          
+
           # Check if @next/bundle-analyzer is available
           if npm list @next/bundle-analyzer > /dev/null 2>&1; then
             echo "Running bundle analyzer..."
             ANALYZE=true npm run build > bundle-analysis.log 2>&1 || echo "Bundle analysis completed with warnings"
           fi
-          
+
           # Extract bundle information from build output
           if [ -f ".next/build-manifest.json" ]; then
             # Count pages and chunks
             PAGES_COUNT=$(find .next/server/pages -name "*.js" 2>/dev/null | wc -l || echo "0")
             CHUNKS_COUNT=$(find .next/static/chunks -name "*.js" 2>/dev/null | wc -l || echo "0")
-            
+
             echo "BUILD_PAGES=$PAGES_COUNT" >> $GITHUB_ENV
             echo "BUILD_CHUNKS=$CHUNKS_COUNT" >> $GITHUB_ENV
-            
+
             echo "📋 Bundle summary:"
             echo "   Pages: $PAGES_COUNT"
             echo "   Chunks: $CHUNKS_COUNT"
@@ -221,7 +220,7 @@ jobs:
           # Collect build information
           NODE_VERSION=$(node --version)
           NPM_VERSION=$(npm --version)
-          
+
           # Detect framework
           if [ -f "next.config.js" ] || [ -f "next.config.ts" ]; then
             FRAMEWORK="Next.js"
@@ -233,12 +232,12 @@ jobs:
             FRAMEWORK="React/Generic"
             FRAMEWORK_VERSION=$(npm list react --depth=0 | grep react@ | cut -d'@' -f2 | cut -d' ' -f1 || echo "Unknown")
           fi
-          
+
           echo "BUILD_NODE_VERSION=$NODE_VERSION" >> $GITHUB_ENV
           echo "BUILD_NPM_VERSION=$NPM_VERSION" >> $GITHUB_ENV
           echo "BUILD_FRAMEWORK=$FRAMEWORK" >> $GITHUB_ENV
           echo "BUILD_FRAMEWORK_VERSION=$FRAMEWORK_VERSION" >> $GITHUB_ENV
-          
+
           # Check for TypeScript
           if [ -f "tsconfig.json" ]; then
             TS_VERSION=$(npx tsc --version || echo "TypeScript installed")
@@ -261,44 +260,40 @@ jobs:
         run: |
           # Determine overall status
           STATUS="success"
-          
-          # Create detailed build information
-          BUILD_DETAILS=$(cat << EOF
-          {
-            "buildDetails": "Frontend build and linting completed successfully!",
-            "metrics": {
-              "buildSize": "${{ env.BUILD_SIZE || 'N/A' }}",
-              "buildFiles": ${{ env.BUILD_FILES || env.BUILD_STATIC_FILES || 0 }},
-              "buildPages": ${{ env.BUILD_PAGES || 0 }},
-              "buildChunks": ${{ env.BUILD_CHUNKS || 0 }},
-              "auditCritical": ${{ env.AUDIT_CRITICAL || 0 }},
-              "auditHigh": ${{ env.AUDIT_HIGH || 0 }},
-              "auditModerate": ${{ env.AUDIT_MODERATE || 0 }}
-            },
-            "environment": {
-              "nodeVersion": "${{ env.BUILD_NODE_VERSION }}",
-              "npmVersion": "${{ env.BUILD_NPM_VERSION }}",
-              "framework": "${{ env.BUILD_FRAMEWORK }}",
-              "frameworkVersion": "${{ env.BUILD_FRAMEWORK_VERSION }}",
-              "typescriptVersion": "${{ env.BUILD_TS_VERSION || 'Not detected' }}",
-              "workingDirectory": "${{ inputs.working-directory }}"
-            },
-            "checks": {
-              "linting": "✅ Passed",
-              "formatting": "✅ Passed", 
-              "typecheck": "${{ inputs.run-typecheck && '✅ Passed' || '⏭️ Skipped' }}",
-              "build": "✅ Passed",
-              "audit": "${{ inputs.run-audit && '✅ Completed' || '⏭️ Skipped' }}"
-            }
-          }
+
+          # Collect audit summary
+          CRIT=${{ env.AUDIT_CRITICAL || 0 }}
+          HIGH=${{ env.AUDIT_HIGH || 0 }}
+          MOD=${{ env.AUDIT_MODERATE || 0 }}
+
+          # Compose PR comment body including audit results
+          BODY=$(cat << EOF
+          ## 🏗️ Frontend Build & Lint Results
+
+          **Status:** ✅ Success
+          **Details:** Frontend build and linting completed successfully!
+
+          ### 🔒 Security Audit
+          - Critical: $CRIT
+          - High: $HIGH
+          - Moderate: $MOD
+
+          ### Build Environment
+          - Node.js: ${{ env.BUILD_NODE_VERSION }}
+          - npm: ${{ env.BUILD_NPM_VERSION }}
+          - Framework: ${{ env.BUILD_FRAMEWORK }} ${{ env.BUILD_FRAMEWORK_VERSION }}
+          - TypeScript: ${{ env.BUILD_TS_VERSION || 'Not detected' }}
+          - Working Directory: \`${{ inputs.working-directory }}\`
+
+          ---
           EOF
           )
-          
+
           node pr-commenter.js \
             --type build \
             --status "$STATUS" \
             --title "🏗️ Frontend Build & Lint Results" \
-            --details "$BUILD_DETAILS"
+            --body "$BODY"
 
       - name: Upload build artifacts
         if: always()
@@ -321,17 +316,17 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ **Status:** Successful" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### 📊 Build Metrics" >> $GITHUB_STEP_SUMMARY
           echo "- **Build Size:** ${{ env.BUILD_SIZE || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Generated Files:** ${{ env.BUILD_FILES || env.BUILD_STATIC_FILES || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
-          
+
           if [ -n "${{ env.BUILD_PAGES }}" ] && [ "${{ env.BUILD_PAGES }}" != "0" ]; then
             echo "- **Pages:** ${{ env.BUILD_PAGES }}" >> $GITHUB_STEP_SUMMARY
             echo "- **Chunks:** ${{ env.BUILD_CHUNKS }}" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           if [ "${{ inputs.run-audit }}" = "true" ]; then
             echo "### 🔍 Security Audit" >> $GITHUB_STEP_SUMMARY
             echo "- **Critical:** ${{ env.AUDIT_CRITICAL || '0' }}" >> $GITHUB_STEP_SUMMARY
@@ -339,7 +334,7 @@ jobs:
             echo "- **Moderate:** ${{ env.AUDIT_MODERATE || '0' }}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           echo "### ✅ Completed Checks" >> $GITHUB_STEP_SUMMARY
           echo "- **Dependency Installation:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
           echo "- **ESLint:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
@@ -348,7 +343,7 @@ jobs:
           echo "- **Build:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
           echo "- **Security Audit:** ${{ inputs.run-audit && '✅ Completed' || '⏭️ Skipped' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### 🔧 Environment" >> $GITHUB_STEP_SUMMARY
           echo "- **Node.js:** ${{ env.BUILD_NODE_VERSION || inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **npm:** ${{ env.BUILD_NPM_VERSION || 'Latest' }}" >> $GITHUB_STEP_SUMMARY
