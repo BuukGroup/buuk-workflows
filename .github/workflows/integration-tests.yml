@@ -207,7 +207,7 @@ jobs:
           # Create detailed test information
           TEST_DETAILS=$(cat << EOF
           {
-            "testDetails": "${{ env.INTEGRATION_SUMMARY }}",
+            "testDetails": "${{ env.INTEGRATION_SUMMARY }} | Passed: ${{ env.INTEGRATION_PASSED }}, Failed: ${{ env.INTEGRATION_FAILED }}, Total: ${{ env.INTEGRATION_TOTAL }}, Duration: ${{ env.INTEGRATION_DURATION }}ms",
             "metrics": {
               "passed": ${{ env.INTEGRATION_PASSED }},
               "failed": ${{ env.INTEGRATION_FAILED }},

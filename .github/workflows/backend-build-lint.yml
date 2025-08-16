@@ -28,6 +28,11 @@ on:
         required: false
         type: boolean
         default: false
+      audit-fail-level:
+        description: "Fail threshold for vulnerabilities (critical|high|moderate|none)"
+        required: false
+        type: string
+        default: "high"
 
 jobs:
   backend-build-lint:
@@ -63,11 +68,12 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: |
           echo "🔍 Running security audit..."
-          if [ "${{ inputs.fail-on-audit }}" = "true" ]; then
-            npm audit --audit-level=high
-          else
-            npm audit --audit-level=high || echo "⚠️ Audit found issues but continuing..."
-          fi
+          AUDIT_FAIL_LEVEL="${{ inputs.audit-fail-level }}"
+          [ -z "$AUDIT_FAIL_LEVEL" ] && AUDIT_FAIL_LEVEL="high"
+          echo "🔧 Audit fail level: $AUDIT_FAIL_LEVEL"
+
+          # Always run audit with selected level, but don't fail step yet
+          npm audit --audit-level="$AUDIT_FAIL_LEVEL" || true
 
           # Generate audit report for artifacts
           npm audit --json > audit-report.json || true
@@ -85,6 +91,41 @@ jobs:
           echo "   Critical: $CRITICAL"
           echo "   High: $HIGH"
           echo "   Moderate: $MODERATE"
+
+          # Enforce fail-on-audit based on selected fail level
+          if [ "${{ inputs.fail-on-audit }}" = "true" ]; then
+            case "$AUDIT_FAIL_LEVEL" in
+              critical)
+                if [ "$CRITICAL" -gt 0 ]; then
+                  echo "❌ Failing build due to critical vulnerabilities"
+                  exit 1
+                fi
+                ;;
+              high)
+                if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+                  echo "❌ Failing build due to high/critical vulnerabilities"
+                  exit 1
+                fi
+                ;;
+              moderate)
+                if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ] || [ "$MODERATE" -gt 0 ]; then
+                  echo "❌ Failing build due to moderate+ vulnerabilities"
+                  exit 1
+                fi
+                ;;
+              none)
+                echo "⏭️ Audit fail level set to 'none' - not failing build on vulnerabilities"
+                ;;
+              *)
+                echo "⚠️ Unknown audit fail level '$AUDIT_FAIL_LEVEL', defaulting to 'high'"
+                if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+                  exit 1
+                fi
+                ;;
+            esac
+          else
+            echo "ℹ️ fail-on-audit=false - not failing build on vulnerabilities"
+          fi
 
       - name: Lint code
         working-directory: ${{ inputs.working-directory }}
