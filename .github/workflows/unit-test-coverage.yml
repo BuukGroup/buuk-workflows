@@ -4,30 +4,29 @@ on:
   workflow_call:
     inputs:
       node-version:
-        description: 'Node.js version to use'
+        description: "Node.js version to use"
         required: false
         type: string
-        default: '24'
+        default: "22"
       project-type:
-        description: 'Project type: backend or frontend'
+        description: "Project type: backend or frontend"
         required: true
         type: string
       coverage-threshold:
-        description: 'Coverage threshold for changed files'
+        description: "Coverage threshold for changed files"
         required: false
         type: number
         default: 20
       working-directory:
-        description: 'Working directory for the project'
+        description: "Working directory for the project"
         required: false
         type: string
-        default: '.'
+        default: "."
       database-required:
-        description: 'Whether PostgreSQL database is required'
+        description: "Whether PostgreSQL database is required"
         required: false
         type: boolean
         default: false
-
 
 jobs:
   unit-test-coverage:
@@ -63,7 +62,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: 'npm'
+          cache: "npm"
           cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
 
       - name: Install system dependencies
@@ -129,7 +128,7 @@ jobs:
           else
             FILE_PATTERNS=".ts,.js"
           fi
-          
+
           # Run coverage calculator for changed files
           node coverage-calculator.js \
             --changed-files \
@@ -152,7 +151,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           PROJECT_NAME="${{ inputs.project-type == 'backend' && 'Backend' || 'Frontend' }}"
-          
+
           node pr-commenter.js \
             --type coverage \
             --title "📊 $PROJECT_NAME Test Coverage Report" \
@@ -184,7 +183,7 @@ jobs:
           PROJECT_NAME="${{ inputs.project-type == 'backend' && 'Backend' || 'Frontend' }}"
           echo "## 🏗️ $PROJECT_NAME Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           if [ -f coverage/coverage-final.json ]; then
             # Extract coverage metrics using a more reliable method
             node -e "
@@ -194,7 +193,7 @@ jobs:
                 let totalFunctions = 0, coveredFunctions = 0;
                 let totalBranches = 0, coveredBranches = 0;
                 let totalStatements = 0, coveredStatements = 0;
-                
+
                 Object.values(coverage).forEach(fileData => {
                   if (fileData.lines) {
                     totalLines += Object.keys(fileData.lines).length;
@@ -213,12 +212,12 @@ jobs:
                     coveredStatements += Object.values(fileData.statements).filter(hits => hits > 0).length;
                   }
                 });
-                
+
                 const linePct = totalLines > 0 ? ((coveredLines / totalLines) * 100).toFixed(2) : '0.00';
                 const funcPct = totalFunctions > 0 ? ((coveredFunctions / totalFunctions) * 100).toFixed(2) : '0.00';
                 const branchPct = totalBranches > 0 ? ((coveredBranches / totalBranches) * 100).toFixed(2) : '0.00';
                 const stmtPct = totalStatements > 0 ? ((coveredStatements / totalStatements) * 100).toFixed(2) : '0.00';
-                
+
                 console.log('LINES_PCT=' + linePct);
                 console.log('FUNCTIONS_PCT=' + funcPct);
                 console.log('BRANCHES_PCT=' + branchPct);
@@ -230,7 +229,7 @@ jobs:
                 console.log('STATEMENTS_PCT=0.00');
               }
             " >> $GITHUB_ENV
-            
+
             echo "| Metric | Coverage | Local Threshold | PR Changed Files Threshold |" >> $GITHUB_STEP_SUMMARY
             echo "|--------|----------|-----------------|---------------------------|" >> $GITHUB_STEP_SUMMARY
             echo "| Lines | $LINES_PCT% | 10% | ${{ inputs.coverage-threshold }}% |" >> $GITHUB_STEP_SUMMARY
@@ -238,7 +237,7 @@ jobs:
             echo "| Branches | $BRANCHES_PCT% | 2% | 10% |" >> $GITHUB_STEP_SUMMARY
             echo "| Statements | $STATEMENTS_PCT% | 2% | 10% |" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            
+
             if [ "${{ github.event_name }}" = "pull_request" ]; then
               echo "**PR Requirements:** Only changed files must meet ${{ inputs.coverage-threshold }}% line coverage" >> $GITHUB_STEP_SUMMARY
             else
@@ -247,7 +246,7 @@ jobs:
           else
             echo "❌ Coverage report not found" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Environment" >> $GITHUB_STEP_SUMMARY
           echo "- **Node.js:** ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY

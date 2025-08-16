@@ -4,31 +4,30 @@ on:
   workflow_call:
     inputs:
       node-version:
-        description: 'Node.js version to use'
+        description: "Node.js version to use"
         required: false
         type: string
-        default: '24'
+        default: "22"
       working-directory:
-        description: 'Working directory for the project'
+        description: "Working directory for the project"
         required: false
         type: string
-        default: '.'
+        default: "."
       run-typecheck:
-        description: 'Run TypeScript type checking'
+        description: "Run TypeScript type checking"
         required: false
         type: boolean
         default: true
       run-audit:
-        description: 'Run npm security audit'
+        description: "Run npm security audit"
         required: false
         type: boolean
         default: true
       fail-on-audit:
-        description: 'Fail build on audit issues'
+        description: "Fail build on audit issues"
         required: false
         type: boolean
         default: false
-
 
 jobs:
   backend-build-lint:
@@ -50,7 +49,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: 'npm'
+          cache: "npm"
           cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
 
       - name: Install dependencies
@@ -69,19 +68,19 @@ jobs:
           else
             npm audit --audit-level=high || echo "⚠️ Audit found issues but continuing..."
           fi
-          
+
           # Generate audit report for artifacts
           npm audit --json > audit-report.json || true
-          
+
           # Count vulnerabilities
           CRITICAL=$(cat audit-report.json | grep -o '"critical":[0-9]*' | cut -d':' -f2 | head -1 || echo "0")
           HIGH=$(cat audit-report.json | grep -o '"high":[0-9]*' | cut -d':' -f2 | head -1 || echo "0")
           MODERATE=$(cat audit-report.json | grep -o '"moderate":[0-9]*' | cut -d':' -f2 | head -1 || echo "0")
-          
+
           echo "AUDIT_CRITICAL=$CRITICAL" >> $GITHUB_ENV
           echo "AUDIT_HIGH=$HIGH" >> $GITHUB_ENV
           echo "AUDIT_MODERATE=$MODERATE" >> $GITHUB_ENV
-          
+
           echo "📊 Security audit summary:"
           echo "   Critical: $CRITICAL"
           echo "   High: $HIGH"
@@ -126,21 +125,21 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: |
           echo "🔍 Verifying build output..."
-          
+
           if [ -d "dist" ]; then
             echo "✅ Build directory 'dist' exists"
-            
+
             # Count generated files
             FILE_COUNT=$(find dist -name "*.js" | wc -l)
             echo "📊 Generated $FILE_COUNT JavaScript files"
-            
+
             # Check for main entry point
             if [ -f "dist/index.js" ]; then
               echo "✅ Main entry point 'dist/index.js' exists"
             else
               echo "⚠️ Main entry point 'dist/index.js' not found"
             fi
-            
+
             # Check build size
             BUILD_SIZE=$(du -sh dist | cut -f1)
             echo "📏 Build size: $BUILD_SIZE"
@@ -155,7 +154,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: |
           echo "🧪 Testing build execution..."
-          
+
           # Test that the built application can start
           timeout 10s node dist/index.js --help > /dev/null 2>&1 || echo "⚠️ Build test completed (may require runtime dependencies)"
           echo "✅ Build execution test completed"
@@ -167,11 +166,11 @@ jobs:
           NODE_VERSION=$(node --version)
           NPM_VERSION=$(npm --version)
           TS_VERSION=$(npx tsc --version)
-          
+
           echo "BUILD_NODE_VERSION=$NODE_VERSION" >> $GITHUB_ENV
           echo "BUILD_NPM_VERSION=$NPM_VERSION" >> $GITHUB_ENV
           echo "BUILD_TS_VERSION=$TS_VERSION" >> $GITHUB_ENV
-          
+
           # Check for any build warnings in the output
           if [ -f "build.log" ]; then
             WARNING_COUNT=$(grep -c "warning" build.log || echo "0")
@@ -196,7 +195,7 @@ jobs:
         run: |
           # Determine overall status
           STATUS="success"
-          
+
           # Create detailed build information
           BUILD_DETAILS=$(cat << EOF
           {
@@ -217,7 +216,7 @@ jobs:
             },
             "checks": {
               "linting": "✅ Passed",
-              "formatting": "✅ Passed", 
+              "formatting": "✅ Passed",
               "typecheck": "${{ inputs.run-typecheck && '✅ Passed' || '⏭️ Skipped' }}",
               "build": "✅ Passed",
               "audit": "${{ inputs.run-audit && '✅ Completed' || '⏭️ Skipped' }}"
@@ -225,7 +224,7 @@ jobs:
           }
           EOF
           )
-          
+
           node pr-commenter.js \
             --type build \
             --status "$STATUS" \
@@ -251,13 +250,13 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ **Status:** Successful" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### 📊 Build Metrics" >> $GITHUB_STEP_SUMMARY
           echo "- **Build Size:** ${{ env.BUILD_SIZE || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Generated Files:** ${{ env.BUILD_FILES || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Build Warnings:** ${{ env.BUILD_WARNINGS || '0' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           if [ "${{ inputs.run-audit }}" = "true" ]; then
             echo "### 🔍 Security Audit" >> $GITHUB_STEP_SUMMARY
             echo "- **Critical:** ${{ env.AUDIT_CRITICAL || '0' }}" >> $GITHUB_STEP_SUMMARY
@@ -265,7 +264,7 @@ jobs:
             echo "- **Moderate:** ${{ env.AUDIT_MODERATE || '0' }}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           echo "### ✅ Completed Checks" >> $GITHUB_STEP_SUMMARY
           echo "- **Dependency Installation:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
           echo "- **ESLint:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
@@ -274,7 +273,7 @@ jobs:
           echo "- **Build:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
           echo "- **Security Audit:** ${{ inputs.run-audit && '✅ Completed' || '⏭️ Skipped' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### 🔧 Environment" >> $GITHUB_STEP_SUMMARY
           echo "- **Node.js:** ${{ env.BUILD_NODE_VERSION || inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **npm:** ${{ env.BUILD_NPM_VERSION || 'Latest' }}" >> $GITHUB_STEP_SUMMARY

@@ -2,18 +2,18 @@
 
 /**
  * PR Commenter Script
- * 
+ *
  * Posts or updates comments on GitHub Pull Requests with test results and coverage reports.
  * Used by GitHub Actions workflows to provide automated feedback.
- * 
+ *
  * Usage:
  *   node pr-commenter.js [options]
- * 
+ *
  * Environment Variables:
  *   GITHUB_TOKEN          GitHub token for API access
  *   GITHUB_REPOSITORY     Repository in format owner/repo
  *   PR_NUMBER             Pull request number
- * 
+ *
  * Options:
  *   --type                Comment type: coverage, e2e, build (required)
  *   --status              Status: success, failure, warning
@@ -25,20 +25,20 @@
  *   --coverage-details    Coverage details markdown
  */
 
-const https = require('https');
-const fs = require('fs');
+const https = require("https");
+const fs = require("fs");
 
 // Parse command line arguments
 const args = process.argv.slice(2);
 const options = {
-  type: getArgValue('--type'),
-  status: getArgValue('--status') || 'success',
-  title: getArgValue('--title'),
-  body: getArgValue('--body'),
-  details: getArgValue('--details'),
-  globalCoverage: getArgValue('--global-coverage'),
-  changedCoverage: getArgValue('--changed-coverage'),
-  coverageDetails: getArgValue('--coverage-details')
+  type: getArgValue("--type"),
+  status: getArgValue("--status") || "success",
+  title: getArgValue("--title"),
+  body: getArgValue("--body"),
+  details: getArgValue("--details"),
+  globalCoverage: getArgValue("--global-coverage"),
+  changedCoverage: getArgValue("--changed-coverage"),
+  coverageDetails: getArgValue("--coverage-details"),
 };
 
 function getArgValue(argName) {
@@ -57,73 +57,83 @@ function getRequiredEnvVar(name) {
 
 function makeGitHubRequest(method, endpoint, data) {
   return new Promise((resolve, reject) => {
-    const token = getRequiredEnvVar('GITHUB_TOKEN');
-    const repo = getRequiredEnvVar('GITHUB_REPOSITORY');
-    
+    const token = getRequiredEnvVar("GITHUB_TOKEN");
+    const repo = getRequiredEnvVar("GITHUB_REPOSITORY");
+
     const postData = data ? JSON.stringify(data) : null;
-    
+
     const requestOptions = {
-      hostname: 'api.github.com',
+      hostname: "api.github.com",
       port: 443,
       path: `/repos/${repo}${endpoint}`,
       method: method,
       headers: {
-        'Authorization': `token ${token}`,
-        'User-Agent': 'Buuk-Workflows-PR-Commenter',
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json'
-      }
+        Authorization: `token ${token}`,
+        "User-Agent": "Buuk-Workflows-PR-Commenter",
+        Accept: "application/vnd.github.v3+json",
+        "Content-Type": "application/json",
+      },
     };
 
     if (postData) {
-      requestOptions.headers['Content-Length'] = Buffer.byteLength(postData);
+      requestOptions.headers["Content-Length"] = Buffer.byteLength(postData);
     }
 
     const req = https.request(requestOptions, (res) => {
-      let responseData = '';
-      
-      res.on('data', (chunk) => {
+      let responseData = "";
+
+      res.on("data", (chunk) => {
         responseData += chunk;
       });
-      
-      res.on('end', () => {
+
+      res.on("end", () => {
         try {
           const parsed = responseData ? JSON.parse(responseData) : {};
           if (res.statusCode >= 200 && res.statusCode < 300) {
             resolve(parsed);
           } else {
-            reject(new Error(`GitHub API error: ${res.statusCode} ${parsed.message || responseData}`));
+            reject(
+              new Error(
+                `GitHub API error: ${res.statusCode} ${parsed.message || responseData}`,
+              ),
+            );
           }
         } catch (error) {
-          reject(new Error(`Failed to parse GitHub API response: ${error.message}`));
+          reject(
+            new Error(`Failed to parse GitHub API response: ${error.message}`),
+          );
         }
       });
     });
 
-    req.on('error', (error) => {
+    req.on("error", (error) => {
       reject(new Error(`Request failed: ${error.message}`));
     });
 
     if (postData) {
       req.write(postData);
     }
-    
+
     req.end();
   });
 }
 
-function generateCoverageComment(globalCoverage, changedCoverage, coverageDetails) {
-  const prNumber = getRequiredEnvVar('PR_NUMBER');
-  const repo = getRequiredEnvVar('GITHUB_REPOSITORY');
-  const [owner, repoName] = repo.split('/');
-  
+function generateCoverageComment(
+  globalCoverage,
+  changedCoverage,
+  coverageDetails,
+) {
+  const prNumber = getRequiredEnvVar("PR_NUMBER");
+  const repo = getRequiredEnvVar("GITHUB_REPOSITORY");
+  const [owner, repoName] = repo.split("/");
+
   let body = `## 📊 Test Coverage Report
 
 ### Global Coverage
-Coverage after merging this PR will be **${globalCoverage || 'N/A'}%**
+Coverage after merging this PR will be **${globalCoverage || "N/A"}%**
 
 ### Changed Files Coverage
-${coverageDetails || 'No coverage details available'}
+${coverageDetails || "No coverage details available"}
 
 ---
 
@@ -131,27 +141,77 @@ ${coverageDetails || 'No coverage details available'}
 `;
 
   return {
-    title: '📊 Test Coverage Report',
+    title: "📊 Test Coverage Report",
     body: body,
-    identifier: 'test-coverage'
+    identifier: "test-coverage",
+  };
+}
+
+function generateIntegrationComment(status, details) {
+  let statusEmoji = "✅";
+  let statusText = "Passed";
+
+  if (status === "failure") {
+    statusEmoji = "❌";
+    statusText = "Failed";
+  } else if (status === "warning") {
+    statusEmoji = "⚠️";
+    statusText = "Warning";
+  }
+
+  const parsedDetails = details ? JSON.parse(details) : {};
+  const testDetails =
+    parsedDetails.testDetails || "All integration tests passed successfully!";
+  const env = parsedDetails.environment || {};
+
+  let body = `## 🧪 Integration Test Results
+
+**Status:** ${statusEmoji} ${statusText}
+**Details:** ${testDetails}
+
+### Test Environment
+- **Node.js:** ${env.nodeVersion || "N/A"}
+- **PostgreSQL:** ${env.postgresVersion || "N/A"} with PostGIS extensions
+- **Test Timeout:** ${env.testTimeout || "N/A"}
+
+---
+
+> 🤖 Automated integration testing (backend only)
+`;
+
+  return {
+    title: "🧪 Integration Test Results",
+    body: body,
+    identifier: "integration-tests",
   };
 }
 
 function generateE2EComment(status, details) {
-  let statusEmoji = '✅';
-  let statusText = 'Passed';
-  
-  if (status === 'failure') {
-    statusEmoji = '❌';
-    statusText = 'Failed';
-  } else if (status === 'warning') {
-    statusEmoji = '⚠️';
-    statusText = 'Warning';
+  if (
+    options &&
+    options.title &&
+    options.title.includes("Integration Test Results")
+  ) {
+    return generateIntegrationComment(status, details);
+  }
+  let statusEmoji = "✅";
+  let statusText = "Passed";
+
+  if (status === "failure") {
+    statusEmoji = "❌";
+    statusText = "Failed";
+  } else if (status === "warning") {
+    statusEmoji = "⚠️";
+    statusText = "Warning";
   }
 
   const parsedDetails = details ? JSON.parse(details) : {};
-  const testDetails = parsedDetails.testDetails || 'All E2E tests passed successfully!';
-  const artifacts = status === 'failure' ? '\n### 📹 Test artifacts available in the Actions tab for debugging' : '';
+  const testDetails =
+    parsedDetails.testDetails || "All E2E tests passed successfully!";
+  const artifacts =
+    status === "failure"
+      ? "\n### 📹 Test artifacts available in the Actions tab for debugging"
+      : "";
 
   let body = `## 🎭 E2E Test Results
 
@@ -171,26 +231,27 @@ ${artifacts}
 `;
 
   return {
-    title: '🎭 E2E Test Results',
+    title: "🎭 E2E Test Results",
     body: body,
-    identifier: 'e2e-tests'
+    identifier: "e2e-tests",
   };
 }
 
 function generateBuildComment(status, details) {
-  let statusEmoji = '✅';
-  let statusText = 'Success';
-  
-  if (status === 'failure') {
-    statusEmoji = '❌';
-    statusText = 'Failed';
-  } else if (status === 'warning') {
-    statusEmoji = '⚠️';
-    statusText = 'Warning';
+  let statusEmoji = "✅";
+  let statusText = "Success";
+
+  if (status === "failure") {
+    statusEmoji = "❌";
+    statusText = "Failed";
+  } else if (status === "warning") {
+    statusEmoji = "⚠️";
+    statusText = "Warning";
   }
 
   const parsedDetails = details ? JSON.parse(details) : {};
-  const buildDetails = parsedDetails.buildDetails || 'Build and linting completed successfully!';
+  const buildDetails =
+    parsedDetails.buildDetails || "Build and linting completed successfully!";
 
   let body = `## 🏗️ Build & Lint Results
 
@@ -208,20 +269,24 @@ function generateBuildComment(status, details) {
 `;
 
   return {
-    title: '🏗️ Build & Lint Results',
+    title: "🏗️ Build & Lint Results",
     body: body,
-    identifier: 'build-lint'
+    identifier: "build-lint",
   };
 }
 
 async function findExistingComment(identifier) {
   try {
-    const prNumber = getRequiredEnvVar('PR_NUMBER');
-    const comments = await makeGitHubRequest('GET', `/issues/${prNumber}/comments`);
-    
-    return comments.find(comment =>
-      comment.body.includes(identifier) || 
-      comment.body.includes(options.title)
+    const prNumber = getRequiredEnvVar("PR_NUMBER");
+    const comments = await makeGitHubRequest(
+      "GET",
+      `/issues/${prNumber}/comments`,
+    );
+
+    return comments.find(
+      (comment) =>
+        comment.body.includes(identifier) ||
+        comment.body.includes(options.title),
     );
   } catch (error) {
     console.error(`⚠️ Failed to fetch existing comments: ${error.message}`);
@@ -231,19 +296,23 @@ async function findExistingComment(identifier) {
 
 async function postOrUpdateComment(commentData) {
   try {
-    const prNumber = getRequiredEnvVar('PR_NUMBER');
+    const prNumber = getRequiredEnvVar("PR_NUMBER");
     const existingComment = await findExistingComment(commentData.identifier);
 
     if (existingComment) {
       // Update existing comment
-      await makeGitHubRequest('PATCH', `/issues/comments/${existingComment.id}`, {
-        body: commentData.body
-      });
+      await makeGitHubRequest(
+        "PATCH",
+        `/issues/comments/${existingComment.id}`,
+        {
+          body: commentData.body,
+        },
+      );
       console.log(`✅ Updated existing ${commentData.title} comment`);
     } else {
       // Create new comment
-      await makeGitHubRequest('POST', `/issues/${prNumber}/comments`, {
-        body: commentData.body
+      await makeGitHubRequest("POST", `/issues/${prNumber}/comments`, {
+        body: commentData.body,
       });
       console.log(`✅ Created new ${commentData.title} comment`);
     }
@@ -255,19 +324,21 @@ async function postOrUpdateComment(commentData) {
 
 function validateOptions() {
   if (!options.type) {
-    console.error('❌ --type is required (coverage, e2e, build)');
+    console.error("❌ --type is required (coverage, e2e, build)");
     process.exit(1);
   }
 
-  if (!['coverage', 'e2e', 'build'].includes(options.type)) {
-    console.error('❌ --type must be one of: coverage, e2e, build');
+  if (!["coverage", "integration", "e2e", "build"].includes(options.type)) {
+    console.error(
+      "❌ --type must be one of: coverage, integration, e2e, build",
+    );
     process.exit(1);
   }
 
   // Validate required environment variables
-  getRequiredEnvVar('GITHUB_TOKEN');
-  getRequiredEnvVar('GITHUB_REPOSITORY');
-  getRequiredEnvVar('PR_NUMBER');
+  getRequiredEnvVar("GITHUB_TOKEN");
+  getRequiredEnvVar("GITHUB_REPOSITORY");
+  getRequiredEnvVar("PR_NUMBER");
 }
 
 async function main() {
@@ -276,22 +347,26 @@ async function main() {
   let commentData;
 
   switch (options.type) {
-    case 'coverage':
+    case "coverage":
       commentData = generateCoverageComment(
         options.globalCoverage,
         options.changedCoverage,
-        options.coverageDetails
+        options.coverageDetails,
       );
       break;
-      
-    case 'e2e':
+
+    case "integration":
+      commentData = generateIntegrationComment(options.status, options.details);
+      break;
+
+    case "e2e":
       commentData = generateE2EComment(options.status, options.details);
       break;
-      
-    case 'build':
+
+    case "build":
       commentData = generateBuildComment(options.status, options.details);
       break;
-      
+
     default:
       console.error(`❌ Unknown comment type: ${options.type}`);
       process.exit(1);
@@ -327,7 +402,7 @@ Options:
 
 Environment Variables:
   GITHUB_TOKEN          GitHub token for API access
-  GITHUB_REPOSITORY     Repository in format owner/repo  
+  GITHUB_REPOSITORY     Repository in format owner/repo
   PR_NUMBER             Pull request number
 
 Examples:
@@ -340,7 +415,7 @@ Examples:
 
 // Run the script
 if (require.main === module) {
-  main().catch(error => {
+  main().catch((error) => {
     console.error(`❌ Script failed: ${error.message}`);
     process.exit(1);
   });
@@ -348,9 +423,10 @@ if (require.main === module) {
 
 module.exports = {
   generateCoverageComment,
+  generateIntegrationComment,
   generateE2EComment,
   generateBuildComment,
   findExistingComment,
   postOrUpdateComment,
-  makeGitHubRequest
+  makeGitHubRequest,
 };
