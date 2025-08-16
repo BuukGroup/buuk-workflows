@@ -2,24 +2,24 @@
 
 /**
  * Integration Test Runner Script
- * 
+ *
  * Runs integration tests (*.acceptance.ts) for LoopBack 4 backend with proper database setup.
- * Uses custom Jest config to avoid conflicts with unit test config.
+ * Uses Mocha (lb-mocha) to run compiled acceptance tests.
  */
 
-const { execSync, spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+const { execSync, spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 
 // Parse command line arguments
 const args = process.argv.slice(2);
 const options = {
-  pattern: getArgValue('--pattern') || '**/*.acceptance.ts',
-  databaseUrl: getArgValue('--database-url') || process.env.TEST_DATABASE_URL,
-  coverage: args.includes('--coverage'),
-  timeout: parseInt(getArgValue('--timeout')) || 30000,
-  verbose: args.includes('--verbose'),
-  bail: args.includes('--bail')
+  pattern: getArgValue("--pattern") || "**/*.acceptance.ts",
+  databaseUrl: getArgValue("--database-url") || process.env.TEST_DATABASE_URL,
+  coverage: args.includes("--coverage"),
+  timeout: parseInt(getArgValue("--timeout")) || 30000,
+  verbose: args.includes("--verbose"),
+  bail: args.includes("--bail"),
 };
 
 function getArgValue(argName) {
@@ -27,248 +27,273 @@ function getArgValue(argName) {
   return index !== -1 && index + 1 < args.length ? args[index + 1] : null;
 }
 
-function log(message, level = 'info') {
+function log(message, level = "info") {
   const timestamp = new Date().toISOString();
-  const prefix = {
-    info: '📋',
-    success: '✅',
-    warning: '⚠️',
-    error: '❌',
-    debug: '🔍'
-  }[level] || 'ℹ️';
-  
+  const prefix =
+    {
+      info: "📋",
+      success: "✅",
+      warning: "⚠️",
+      error: "❌",
+      debug: "🔍",
+    }[level] || "ℹ️";
+
   console.log(`${prefix} [${timestamp}] ${message}`);
 }
 
-
 function buildJestCommand() {
-  // Use the existing integration config from buuk-server
-  const jestArgs = [
-    '--config=jest.integration.config.js',
-    `--testTimeout=${options.timeout}`,
-    '--verbose',
-    '--detectOpenHandles',
-    '--forceExit'
+  // Deprecated: integration tests use Mocha (lb-mocha) exclusively
+  return "";
+}
+
+/**
+ * Detect preferred test runner.
+ * Prefers Mocha when package.json scripts.test:integration contains "lb-mocha".
+ */
+function detectRunner() {
+  // Deprecated: integration tests use Mocha (lb-mocha) exclusively
+  return "mocha";
+}
+
+/**
+ * Build lb-mocha command for running compiled JS acceptance tests.
+ */
+function buildMochaCommand() {
+  const mochaArgs = [
+    "--allow-console-logs",
+    "dist/__tests__/acceptance/**/*.acceptance.js",
   ];
-  
-  if (options.coverage) {
-    jestArgs.push('--coverage');
-    jestArgs.push('--coverageDirectory=coverage-integration');
+
+  if (options.timeout) {
+    mochaArgs.push("--timeout");
+    mochaArgs.push(String(options.timeout));
   }
-  
+
   if (options.bail) {
-    jestArgs.push('--bail');
+    mochaArgs.push("--bail");
   }
-  
-  if (process.env.CI) {
-    jestArgs.push('--ci');
-    jestArgs.push('--watchman=false');
-  }
-  
-  return `npx jest ${jestArgs.join(' ')}`;
+
+  mochaArgs.push("--color");
+  return `npx lb-mocha ${mochaArgs.join(" ")}`;
 }
 
 function validateEnvironment() {
-  log('Validating environment for integration tests...');
-  
+  log("Validating environment for integration tests...");
+
   const nodeVersion = process.version;
   log(`Node.js version: ${nodeVersion}`);
-  
-  if (!nodeVersion.startsWith('v24.')) {
-    log('Warning: Expected Node.js 24.x, consider upgrading', 'warning');
+
+  if (!nodeVersion.startsWith("v24.")) {
+    log("Warning: Expected Node.js 24.x, consider upgrading", "warning");
   }
-  
+
   if (!process.env.NODE_ENV) {
-    process.env.NODE_ENV = 'test';
-    log('Set NODE_ENV=test');
+    process.env.NODE_ENV = "test";
+    log("Set NODE_ENV=test");
   }
-  
+
   if (!options.databaseUrl) {
-    log('Database URL not provided, using default PostgreSQL connection', 'warning');
-    options.databaseUrl = 'postgresql://postgres:postgres@localhost:5432/buukdb';
+    log(
+      "Database URL not provided, using default PostgreSQL connection",
+      "warning",
+    );
+    options.databaseUrl =
+      "postgresql://postgres:postgres@localhost:5432/buukdb";
   }
-  
+
   process.env.TEST_DATABASE_URL = options.databaseUrl;
-  log(`Database URL: ${options.databaseUrl.replace(/\/\/.*@/, '//***@')}`);
-  
+  log(`Database URL: ${options.databaseUrl.replace(/\/\/.*@/, "//***@")}`);
+
   if (process.env.CI) {
-    log('Running in CI environment');
+    log("Running in CI environment");
   }
 }
 
 function findTestFiles() {
   log(`Searching for test files with pattern: ${options.pattern}`);
-  
+
   try {
     const testFiles = execSync(
       `find . -name "*.acceptance.ts" -type f | grep -E "(src|__tests__)" | head -20`,
-      { encoding: 'utf8', stdio: 'pipe' }
-    ).trim().split('\\n').filter(Boolean);
-    
+      { encoding: "utf8", stdio: "pipe" },
+    )
+      .trim()
+      .split("\\n")
+      .filter(Boolean);
+
     if (testFiles.length === 0) {
-      log('No integration test files found!', 'warning');
+      log("No integration test files found!", "warning");
       return [];
     }
-    
+
     log(`Found ${testFiles.length} integration test files:`);
-    testFiles.forEach(file => log(`  - ${file}`, 'debug'));
-    
+    testFiles.forEach((file) => log(`  - ${file}`, "debug"));
+
     return testFiles;
   } catch (error) {
-    log(`Error finding test files: ${error.message}`, 'error');
+    log(`Error finding test files: ${error.message}`, "error");
     return [];
   }
 }
 
 function checkDatabaseConnection() {
-  log('Checking database connection...');
-  
+  log("Checking database connection...");
+
   try {
-    const { URL } = require('url');
+    const { URL } = require("url");
     const dbUrl = new URL(options.databaseUrl);
     const host = dbUrl.hostname;
     const port = dbUrl.port || 5432;
     const database = dbUrl.pathname.slice(1);
-    
+
     try {
-      execSync(`pg_isready -h ${host} -p ${port} -U ${dbUrl.username} -d ${database}`, 
-        { stdio: 'pipe', timeout: 5000 });
-      log('Database connection test passed', 'success');
+      execSync(
+        `pg_isready -h ${host} -p ${port} -U ${dbUrl.username} -d ${database}`,
+        { stdio: "pipe", timeout: 5000 },
+      );
+      log("Database connection test passed", "success");
       return true;
     } catch (pgError) {
-      log('pg_isready not available or connection failed, continuing anyway...', 'warning');
+      log(
+        "pg_isready not available or connection failed, continuing anyway...",
+        "warning",
+      );
       return true;
     }
   } catch (error) {
-    log(`Database URL parsing error: ${error.message}`, 'error');
+    log(`Database URL parsing error: ${error.message}`, "error");
     return false;
   }
 }
 
 async function runIntegrationTests() {
   return new Promise((resolve, reject) => {
-    log('Starting integration tests...');
-    
-    const command = buildJestCommand();
-    log(`Running command: ${command}`, 'debug');
-    
+    log("Starting integration tests...");
+
+    const command = buildMochaCommand();
+    log(`Using runner: mocha`, "info");
+    log(`Running command: ${command}`, "debug");
+
     const startTime = Date.now();
-    
-    const child = spawn('npx', ['jest', ...buildJestCommand().split(' ').slice(2)], {
-      stdio: 'pipe',
+
+    const child = spawn("npx", ["lb-mocha", ...command.split(" ").slice(2)], {
+      stdio: "pipe",
       env: {
         ...process.env,
-        NODE_ENV: 'test',
+        NODE_ENV: "test",
         TEST_DATABASE_URL: options.databaseUrl,
-        FORCE_COLOR: '1'
-      }
+        FORCE_COLOR: "1",
+      },
     });
-    
-    let stdout = '';
-    let stderr = '';
-    
-    child.stdout.on('data', (data) => {
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (data) => {
       const output = data.toString();
       stdout += output;
       if (options.verbose) {
         process.stdout.write(output);
       }
     });
-    
-    child.stderr.on('data', (data) => {
+
+    child.stderr.on("data", (data) => {
       const output = data.toString();
       stderr += output;
       if (options.verbose) {
         process.stderr.write(output);
       }
     });
-    
-    child.on('close', (code) => {
+
+    child.on("close", (code) => {
       const duration = Date.now() - startTime;
-      
-      // Cleanup temporary config file
-      try {
-        fs.unlinkSync('jest.integration.config.js');
-      } catch (cleanupError) {
-        log('Could not cleanup temporary config file', 'warning');
-      }
-      
+
+      // No temporary files to cleanup for Mocha
+
       if (code === 0) {
-        log(`Integration tests completed successfully in ${duration}ms`, 'success');
-        
-        const testResults = parseJestOutput(stdout);
+        log(
+          `Integration tests completed successfully in ${duration}ms`,
+          "success",
+        );
+
+        const testResults = parseMochaOutput(stdout);
         if (testResults) {
-          log(`Test Summary: ${testResults.passed} passed, ${testResults.failed} failed, ${testResults.total} total`);
+          log(
+            `Test Summary: ${testResults.passed} passed, ${testResults.failed} failed, ${testResults.total} total`,
+          );
         }
-        
+
         resolve({
           success: true,
           code,
           stdout,
           stderr,
           duration,
-          results: testResults
+          results: testResults,
         });
       } else {
-        log(`Integration tests failed with exit code ${code}`, 'error');
-        
-        const errorLines = stderr.split('\\n').slice(-10).join('\\n');
+        log(`Integration tests failed with exit code ${code}`, "error");
+
+        const errorLines = stderr.split("\\n").slice(-10).join("\\n");
         if (errorLines.trim()) {
-          log('Last error output:', 'debug');
-          log(errorLines, 'debug');
+          log("Last error output:", "debug");
+          log(errorLines, "debug");
         }
-        
+
         reject({
           success: false,
           code,
           stdout,
           stderr,
           duration,
-          error: `Tests failed with exit code ${code}`
+          error: `Tests failed with exit code ${code}`,
         });
       }
     });
-    
-    child.on('error', (error) => {
-      log(`Failed to start test process: ${error.message}`, 'error');
+
+    child.on("error", (error) => {
+      log(`Failed to start test process: ${error.message}`, "error");
       reject({
         success: false,
-        error: error.message
+        error: error.message,
       });
     });
   });
 }
 
-function parseJestOutput(output) {
+function parseMochaOutput(output) {
   try {
-    const summaryMatch = output.match(/Tests:\\s+(\\d+)\\s+failed,\\s+(\\d+)\\s+passed,\\s+(\\d+)\\s+total/);
-    if (summaryMatch) {
+    // Match "x passing", optionally also capture "y failing"
+    const passingMatch = output.match(/(\d+)\s+passing/);
+    const failingMatch = output.match(/(\d+)\s+failing/);
+    const pendingMatch = output.match(/(\d+)\s+pending/);
+    const skippedMatch = output.match(/(\d+)\s+skipped/);
+
+    const passed = passingMatch ? parseInt(passingMatch[1]) : 0;
+    const failed = failingMatch ? parseInt(failingMatch[1]) : 0;
+    const pending = pendingMatch ? parseInt(pendingMatch[1]) : 0;
+    const skipped = skippedMatch ? parseInt(skippedMatch[1]) : 0;
+
+    const total = passed + failed + pending + skipped;
+
+    if (passed || failed || pending || skipped) {
       return {
-        failed: parseInt(summaryMatch[1]),
-        passed: parseInt(summaryMatch[2]),
-        total: parseInt(summaryMatch[3])
+        failed,
+        passed,
+        total: total || passed,
       };
     }
-    
-    const altMatch = output.match(/(\\d+)\\s+passing/);
-    if (altMatch) {
-      return {
-        failed: 0,
-        passed: parseInt(altMatch[1]),
-        total: parseInt(altMatch[1])
-      };
-    }
-    
+
     return null;
   } catch (error) {
-    log(`Error parsing Jest output: ${error.message}`, 'debug');
+    log(`Error parsing Mocha output: ${error.message}`, "debug");
     return null;
   }
 }
 
 function generateSummary(results) {
-  log('Generating test summary...');
-  
+  log("Generating test summary...");
+
   const summary = {
     timestamp: new Date().toISOString(),
     success: results.success,
@@ -278,47 +303,52 @@ function generateSummary(results) {
       nodeVersion: process.version,
       nodeEnv: process.env.NODE_ENV,
       ci: !!process.env.CI,
-      databaseUrl: options.databaseUrl.replace(/\/\/.*@/, '//***@')
-    }
+      databaseUrl: options.databaseUrl.replace(/\/\/.*@/, "//***@"),
+    },
   };
-  
+
   try {
-    fs.writeFileSync('integration-test-results.json', JSON.stringify(summary, null, 2));
-    log('Test summary written to integration-test-results.json', 'success');
+    fs.writeFileSync(
+      "integration-test-results.json",
+      JSON.stringify(summary, null, 2),
+    );
+    log("Test summary written to integration-test-results.json", "success");
   } catch (error) {
-    log(`Failed to write summary file: ${error.message}`, 'warning');
+    log(`Failed to write summary file: ${error.message}`, "warning");
   }
-  
+
   return summary;
 }
 
 async function main() {
   try {
-    log('🧪 Buuk Integration Test Runner');
-    log('================================');
-    
+    log("🧪 Buuk Integration Test Runner");
+    log("================================");
+
     validateEnvironment();
-    
+
     const testFiles = findTestFiles();
     if (testFiles.length === 0) {
-      log('No integration tests to run', 'warning');
+      log("No integration tests to run", "warning");
       process.exit(0);
     }
-    
+
     if (!checkDatabaseConnection()) {
-      log('Database connection check failed', 'error');
+      log("Database connection check failed", "error");
       process.exit(1);
     }
-    
+
     const results = await runIntegrationTests();
     generateSummary(results);
-    
-    log('Integration test execution completed', 'success');
+
+    log("Integration test execution completed", "success");
     process.exit(results.success ? 0 : 1);
-    
   } catch (error) {
-    log(`Integration test runner failed: ${error.message || error.error}`, 'error');
-    
+    log(
+      `Integration test runner failed: ${error.message || error.error}`,
+      "error",
+    );
+
     const failureSummary = {
       timestamp: new Date().toISOString(),
       success: false,
@@ -326,16 +356,19 @@ async function main() {
       environment: {
         nodeVersion: process.version,
         nodeEnv: process.env.NODE_ENV,
-        ci: !!process.env.CI
-      }
+        ci: !!process.env.CI,
+      },
     };
-    
+
     try {
-      fs.writeFileSync('integration-test-results.json', JSON.stringify(failureSummary, null, 2));
+      fs.writeFileSync(
+        "integration-test-results.json",
+        JSON.stringify(failureSummary, null, 2),
+      );
     } catch (writeError) {
-      log(`Failed to write failure summary: ${writeError.message}`, 'warning');
+      log(`Failed to write failure summary: ${writeError.message}`, "warning");
     }
-    
+
     process.exit(1);
   }
 }
@@ -349,6 +382,6 @@ module.exports = {
   findTestFiles,
   checkDatabaseConnection,
   runIntegrationTests,
-  parseJestOutput,
-  generateSummary
+  parseMochaOutput,
+  generateSummary,
 };
