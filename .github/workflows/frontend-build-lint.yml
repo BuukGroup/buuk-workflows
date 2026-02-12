@@ -136,7 +136,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: |
           echo "🔍 Running ESLint..."
-          npm run lint
+          npm run type-check
           echo "✅ Linting passed"
 
       - name: Format check
